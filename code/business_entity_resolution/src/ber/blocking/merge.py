@@ -144,15 +144,21 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
     return _cap_per_s1(_rank_per_cand(candidates, k_per_query, min_score), max_cands)
 
 
+PASS_LIMITS = {"name_freq_cap": 2000, "addr_freq_cap": 2000, "house_freq_cap": 50, "top_k_per_query": 50}
+
+
 def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int, k_per_query: int,
-                   min_score: float | None) -> list[Path]:
+                   min_score: float | None, limits: dict[str, int] = PASS_LIMITS) -> list[Path]:
     """Stream one country: S1 indexes built once, S2/S3 queried in chunks of ``chunk_rows`` records.
 
     Phase 1: every pass runs on each chunk; raw hits go to disk and the per-pass max score is tracked.
     Phase 2: each chunk is normalized with the country-wide pass maxima, merged, re-ranked (rank_score) and cut to
     the top ``k_per_query`` S1s per cand_id; the (small) result goes to disk. Returns the result files.
     Memory is bounded by the chunk (+ the country's S1 indexes), not by the country's pair count.
+    ``limits`` (PASS_LIMITS keys): tokens / house numbers with a document frequency above the cap are not used as
+    keys; each pass keeps at most top_k_per_query S1s per record.
     """
+    lim = {**PASS_LIMITS, **limits}
     s1_recs, query_recs = recs.filter(pl.col("source") == 1), recs.filter(pl.col("source") > 1)
     print(f"\n  -- {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 --")
     if s1_recs.height == 0 or query_recs.height == 0:
@@ -164,19 +170,23 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
     house_idf, house_df = compute_token_idf(recs, "house_num", country), compute_df_counts(recs, "house_num", country)
     t = time.time()
     legal_skel = frozenset(t for form in rules.legal_forms(country) for t in name_skeleton(_normalize_base(form)).split())
-    name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel)
-    addr_index = build_address_index(s1_recs, addr_idf, addr_df)
-    house_index = build_house_index(s1_recs, house_idf, house_df)
+    name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel,
+                                  freq_cap=lim["name_freq_cap"])
+    addr_index = build_address_index(s1_recs, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"])
+    house_index = build_house_index(s1_recs, house_idf, house_df, freq_cap=lim["house_freq_cap"])
     print(f"    indexes built in {time.time() - t:.1f}s")
 
     raw_files, pass_max, n_raw = [], {}, 0
     for i, lo in enumerate(range(0, query_recs.height, chunk_rows)):  # chunks of records, not rows
         part = query_recs.slice(lo, chunk_rows)
         raw = pl.concat([
-            query_name_index(name_index, part, name_idf, name_df, skel_idf, skel_df, legal_skel)
+            query_name_index(name_index, part, name_idf, name_df, skel_idf, skel_df, legal_skel,
+                             freq_cap=lim["name_freq_cap"], top_k_per_query=lim["top_k_per_query"])
             .with_columns(bit=PASS_NAME_TOKEN),
-            query_address_index(addr_index, part, addr_idf, addr_df).with_columns(bit=PASS_ADDR_KEY),
-            query_house_index(house_index, part, house_df).with_columns(bit=PASS_HOUSE_NUM),
+            query_address_index(addr_index, part, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"],
+                                top_k_per_query=lim["top_k_per_query"]).with_columns(bit=PASS_ADDR_KEY),
+            query_house_index(house_index, part, house_df, freq_cap=lim["house_freq_cap"])
+            .with_columns(bit=PASS_HOUSE_NUM),
         ]).with_columns(pl.col("bit").cast(pl.Int8))
         for bit, mx in raw.group_by("bit").agg(pl.col("score").max()).iter_rows():
             pass_max[bit] = max(pass_max.get(bit, 0.0), mx)
@@ -217,7 +227,9 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
     k_per_query = int(cfg.get("blocking.k_per_query", 2)) if k_per_query is None else k_per_query
     min_score = cfg.get("blocking.min_score", None)   # None or 0 = off
     chunk_rows = int(cfg.get("blocking.chunk_rows", 50_000))
-    print(f"  k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}, chunk_rows={chunk_rows}")
+    limits = {k: int(cfg.get(f"blocking.{k}", v)) for k, v in PASS_LIMITS.items()}
+    print(f"  k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}, chunk_rows={chunk_rows}, "
+          f"limits={limits}")
 
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=cfg.cache_dir, prefix="tmp_block_", ignore_cleanup_errors=True) as tmp:
@@ -225,7 +237,7 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
         for country in countries:  # countries, not rows
             tc = time.time()
             recs = pl.scan_parquet(path).filter(pl.col("country") == country).select(RECORD_COLS).collect()
-            kept_files += _block_country(recs, country, Path(tmp), chunk_rows, k_per_query, min_score)
+            kept_files += _block_country(recs, country, Path(tmp), chunk_rows, k_per_query, min_score, limits)
             del recs
             print(f"    {country} done in {time.time() - tc:.1f}s")
         candidates = (pl.concat([pl.read_parquet(f) for f in kept_files]) if kept_files

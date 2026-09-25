@@ -132,6 +132,7 @@ docs/   MODELS.md  Documentation_template.md (filled at the end)
   rank_in_cand` (rank of this S1 among the S1s retrieved for this candidate, 1 = best), `block_score` (best pass score)
 - `features_{split}.parquet`: `s1_id, cand_id, <feature columns>, label (train/val only)`
 - `scores_{split}.parquet`: `s1_id, cand_id, p` (calibrated)
+- `matches_{split}.parquet`: `s1_id, cand_id, p` — decision-layer output (after one-to-one + selection); input of `submit`
 - `folds_train.parquet`: `s1_id, fold (0–4), country, n_matches`
 - `gt_train.parquet`: `s1_id, match_id` — long ground truth, one row per matched pair (S1s without matches have no row;
   the S1 universe comes from `records_train.parquet`). Built by `ber.eval.metric.gt_long` from the raw GT at ingest.

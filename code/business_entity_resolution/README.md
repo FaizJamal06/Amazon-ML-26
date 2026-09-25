@@ -25,20 +25,34 @@ student_resource/utils/validate_submission.py
 
 Paths are set in `configs/base.yaml`, relative to the repo root. Never modify files under `student_resource/`.
 
-## Running (planned — stages are stubs today)
+## Running
 
 ```bash
 cd code/business_entity_resolution/src
-python -m ber.pipeline ingest      # TSV -> parquet cache            (planned)
-python -m ber.pipeline block       # candidates_{split}.parquet      (planned)
-python -m ber.pipeline featurize   # features_{split}.parquet        (planned)
-python -m ber.pipeline train       # 5-fold OOF LightGBM + calibration (planned)
-python -m ber.pipeline predict     # scores_test.parquet             (planned)
-python -m ber.pipeline submit      # output/*.tsv + validator        (planned)
-python -m ber.pipeline all         # everything above                (planned)
+python -m ber.pipeline <stage> --split {train,test} [--subworld] [--config override.yaml] [--set key=value ...]
 ```
 
-Every stage will accept `--subworld 0.1` for the fast loop.
+| stage | split | owner | output (in `cache/`) | status |
+|---|---|---|---|---|
+| `ingest` | both | Chris | raw parquet, `gt_train.parquet` | planned |
+| `normalize` | both | Dhanishkaa | `records_{split}.parquet` | planned |
+| `block` | both | Dhanishkaa | `candidates_{split}.parquet` | planned |
+| `folds` | train | Faiz | `folds_train.parquet` | ready |
+| `subworld` | train | Faiz | `subworld_train.parquet` + `*_train_sw.parquet` | ready |
+| `blocking-report` | train | Faiz | markdown report on stdout | ready |
+| `featurize` | both | Nitish | `features_{split}.parquet` | planned |
+| `train` / `predict` | train / test | Nitish | `scores_{split}.parquet` | planned |
+| `decide` | both | Faiz | `matches_{split}.parquet` (+ OOF threshold curve on train) | ready |
+| `submit` | test | Faiz | `output/*.tsv`, official validator must PASS | ready |
+| `all` | both | – | the whole chain for the split | – |
+
+`--subworld` runs a stage on the closed sub-world (`subworld_frac` of the S1s, CLAUDE.md §6). Every stage logs
+the config hash, git commit, runtime and peak memory.
+
+**Stub data** (no real data needed): `python code/business_entity_resolution/scripts/make_stub_data.py` from the
+repo root, then add `--set paths.cache_dir=cache/stub` to any stage.
+
+**Tests:** `python -m pytest code/business_entity_resolution/tests`, or run any `tests/test_*.py` file directly.
 
 ## Validate before every upload
 

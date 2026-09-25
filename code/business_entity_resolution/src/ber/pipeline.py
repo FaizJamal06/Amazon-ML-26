@@ -115,7 +115,9 @@ def stage_decide(cfg: Config, split: str, subworld: bool) -> None:
     """One-to-one + v1 threshold -> matches_{split}.parquet; on train also prints the OOF threshold curve."""
     from ber.decide.assign import assign_one_to_one
     from ber.decide.select import best_threshold, select_threshold, threshold_curve, threshold_grid
-    scores, cand = _read(cfg, "scores", split, subworld), _read(cfg, "candidates", split, subworld)
+    scores_name = cfg.get("decide.scores_name", "scores")
+    scores, cand = _read(cfg, scores_name, split, subworld), _read(cfg, "candidates", split, subworld)
+    print(f"decide: reading {scores_name}")
     if split == "train":
         curve = threshold_curve(scores, _read(cfg, "gt", split, subworld), _s1_universe(cfg, split, subworld),
                                 threshold_grid(*cfg.get("decide.grid")), cand, cfg.decision_margin)
@@ -148,7 +150,20 @@ def _train_only(stage: str, split: str) -> None:
         raise SystemExit(f"{stage} needs ground truth: use --split train")
 
 
+def stage_fallback_train(cfg: Config, split: str, subworld: bool) -> None:
+    """Fallback scorer: OOF calibrated ``scores_fallback`` on train + saved model (ber.fallback)."""
+    from ber.fallback import fallback_train
+    fallback_train(cfg, split, subworld)
+
+
+def stage_fallback_predict(cfg: Config, split: str, subworld: bool) -> None:
+    """Fallback scorer: ``scores_fallback`` for the given split from the saved model (ber.fallback)."""
+    from ber.fallback import fallback_predict
+    fallback_predict(cfg, split, subworld)
+
+
 R1_STAGES: dict[str, Callable[[Config, str, bool], None]] = {
+    "fallback-train": stage_fallback_train, "fallback-predict": stage_fallback_predict,
     "folds": stage_folds, "subworld": stage_subworld, "blocking-report": stage_blocking_report,
     "decide": stage_decide, "submit": stage_submit,
 }

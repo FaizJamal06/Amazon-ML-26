@@ -8,6 +8,10 @@ decision_margin: 0.0     # extra conservatism in set selection; tuned with LB fe
 decide:
   threshold: 0.5         # v1 global threshold on calibrated p after one-to-one assignment (tuned on OOF)
   grid: [0.30, 0.95, 0.05]   # start, stop (inclusive), step for the OOF threshold sweep
+  scores_name: scores    # which scores artifact decide reads: scores (LightGBM) | scores_fallback
+
+fallback:
+  max_train_s1: 300000   # S1s (with all their pairs) per fold model of the fallback scorer
 
 paths:
   data_dir: student_resource/dataset

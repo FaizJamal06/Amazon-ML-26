@@ -1,0 +1,49 @@
+# --- data & official bundle (never commit) ---
+student_resource/
+*.zip
+*.tsv
+*.parquet
+*.feather
+*.arrow
+*.npy
+*.npz
+data/
+cache/
+artifacts/
+# ...except the two submission files
+!output/
+!output/*.tsv
+
+# --- models & weights ---
+models/
+*.pt
+*.bin
+*.safetensors
+*.onnx
+*.lgb
+*.pkl
+*.joblib
+mlruns/
+wandb/
+
+# --- environments & tooling ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+__MACOSX/
+.idea/
+.vscode/
+
+# --- secrets ---
+.env
+.env.*
+*.pem
+*.key
+credentials*
+.aws/
+
+# --- big logs ---
+*.log

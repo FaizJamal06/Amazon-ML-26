@@ -1,17 +1,17 @@
-"""Exact / sorted-key blocking passes: name-token IDF join and address-key join.
+"""Exact / sorted-key blocking passes: name-token IDF join, address-key join, house-number join.
+
+Each pass has an index builder (S1 records of one country, called once) and a query function (a chunk of that
+country's S2/S3 records), so merge.py can stream the queries with bounded memory.
 
 Contract:
-In: records_{split}.parquet. Out: (s1_id, cand_id, block_score, pass_bit) pairs for merge.py.
+In: records_{split}.parquet. Out: (cand_id, s1_id, score) pairs per pass for merge.py.
 
 Owner: Dhanishkaa (R2 Normalize / Blocking)
 """
 from __future__ import annotations
 
-import math
-import tempfile
-from pathlib import Path
-from collections import Counter
 import heapq
+import math
 
 import polars as pl
 
@@ -69,7 +69,7 @@ def compute_token_idf(records: pl.DataFrame, column: str, country: str) -> dict[
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §2  PASS A — NAME TOKEN BLOCKING
+# §2  PASSES — index built once per country, queried per chunk of S2/S3 records
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -96,246 +96,132 @@ def _get_rarest_tokens(tokens: list[str], idf: dict[str, float], k: int = 3,
     return [t for t, _ in scored[:k]]
 
 
-def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
-                    idf: dict[str, float], country_df: dict[str, int],
-                    skel_idf: dict[str, float], skel_df: dict[str, int],
-                    country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 50) -> tuple[pl.LazyFrame, int]:
-    """Pass A: name-token blocking. For each S2/S3 record, find S1s sharing rare name tokens.
+Index = dict  # token or (house_num, token) -> list of (s1_id, idf score)
+PAIR_SCHEMA = {"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64}
 
-    Direction: S2/S3 → S1 (each S2/S3 retrieves its top-k S1 candidates).
-    Always within the same country.
 
-    Args:
-        s1_records: S1 records for this country.
-        query_records: S2/S3 records for this country.
-        idf: token → IDF scores.
-        country_df: token → document frequency.
-        skel_idf: skeleton token → IDF scores.
-        skel_df: skeleton token → document frequency.
-        country: country label.
-        freq_cap: skip tokens with DF > this.
-        k_tokens: number of rarest tokens per record.
-        top_k_per_query: cap S1 candidates per query inside the pass to save memory.
+def _pairs_frame(pairs: list[tuple[str, str, float]]) -> pl.DataFrame:
+    """(cand_id, s1_id, score) rows -> DataFrame with a fixed schema (also when empty)."""
+    return pl.DataFrame(pairs, schema=PAIR_SCHEMA, orient="row")
 
-    Returns:
-        DataFrame with (cand_id, s1_id, score) — score = sum of IDF of shared tokens.
+
+def _top_scores(index: Index, keys: list, top_k: int) -> list[tuple[str, float]]:
+    """Sum the index scores of every S1 hit by ``keys`` and return the ``top_k`` best (s1_id, score).
+
+    Ties keep index insertion order (heapq.nlargest is stable), so results are deterministic.
     """
-    # Build S1 inverted index: token → list of (s1_id, idf_score)
-    s1_index: dict[str, list[tuple[str, float]]] = {}
-
-    for row in s1_records.select("entity_id", "name_tokens", "name_skeleton", "name_script").iter_rows(named=True):
-        tokens = row["name_tokens"] or []
-        rare = _get_rarest_tokens(tokens, idf, k_tokens, freq_cap, country_df)
-
-        # Always add skeleton tokens — skeleton is the shared representation
-        # between Latin S1 names and transliterated non-Latin S2/S3 names
-        if row["name_skeleton"]:
-            skel_tokens = row["name_skeleton"].split()
-            skel_rare = _get_rarest_tokens(skel_tokens, skel_idf, k_tokens, freq_cap, skel_df)
-            rare = list(dict.fromkeys(rare + skel_rare))  # ordered dedup: set order varies per process
-
-        for token in rare:
-            if token not in s1_index:
-                s1_index[token] = []
-            s1_index[token].append((row["entity_id"], idf.get(token, skel_idf.get(token, 10.0))))
-
-    chunk_files = []
-    total_pairs = 0
-    chunk_size = 50_000
-    n_chunks = max(1, math.ceil(query_records.height / chunk_size))
-
-    for i in range(n_chunks):
-        pairs: list[tuple[str, str, float]] = []
-        chunk = query_records.slice(i * chunk_size, chunk_size)
-
-        for row in chunk.select("entity_id", "name_tokens", "name_skeleton", "name_script").iter_rows(named=True):
-            tokens = row["name_tokens"] or []
-            rare = _get_rarest_tokens(tokens, idf, k_tokens, freq_cap, country_df)
-
-            # For non-Latin, also query with skeleton tokens
-            if row["name_script"] != "Latin" and row["name_skeleton"]:
-                skel_tokens = row["name_skeleton"].split()
-                skel_rare = _get_rarest_tokens(skel_tokens, skel_idf, k_tokens, freq_cap, skel_df)
-                rare = list(dict.fromkeys(rare + skel_rare))  # ordered dedup: set order varies per process
-
-            # Accumulate scores per S1
-            s1_scores: dict[str, float] = {}
-            for token in rare:
-                if token in s1_index:
-                    for s1_id, token_idf in s1_index[token]:
-                        s1_scores[s1_id] = s1_scores.get(s1_id, 0.0) + token_idf
-
-            if s1_scores:
-                top_k = min(top_k_per_query, len(s1_scores))
-                for s1_id in heapq.nlargest(top_k, s1_scores, key=s1_scores.get):
-                    pairs.append((row["entity_id"], s1_id, s1_scores[s1_id]))
-
-        if pairs:
-            chunk_df = pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
-            total_pairs += chunk_df.height
-            chunk_path = out_dir / f"name_pass_{i}.parquet"
-            chunk_df.write_parquet(chunk_path)
-            chunk_files.append(chunk_path)
-
-    if not chunk_files:
-        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64}).lazy(), 0
-
-    return pl.scan_parquet([str(p) for p in chunk_files]), total_pairs
+    s1_scores: dict[str, float] = {}
+    for key in keys:
+        for s1_id, score in index.get(key, ()):
+            s1_scores[s1_id] = s1_scores.get(s1_id, 0.0) + score
+    return [(s, s1_scores[s]) for s in heapq.nlargest(min(top_k, len(s1_scores)), s1_scores, key=s1_scores.get)]
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# §3  PASS B — ADDRESS KEY BLOCKING
-# ═══════════════════════════════════════════════════════════════════════════════
+def _name_keys(row: dict, idf: dict[str, float], country_df: dict[str, int], skel_idf: dict[str, float],
+               skel_df: dict[str, int], freq_cap: int, k_tokens: int, always_skeleton: bool,
+               legal_skel: frozenset[str]) -> list[str]:
+    """Rarest name_core tokens of a record (legal form removed) + rarest skeleton tokens that are not the skeleton of
+    a legal-form word (always for S1, only non-Latin for queries), so 'limited' / 'private' / 'llc' and their
+    transliterations ('limiteda' -> 'lmtd') never take the slots."""
+    rare = _get_rarest_tokens((row["name_core"] or "").split(), idf, k_tokens, freq_cap, country_df)
+    if row["name_skeleton"] and (always_skeleton or row["name_script"] != "Latin"):
+        skel_tokens = [t for t in row["name_skeleton"].split() if t not in legal_skel]
+        skel_rare = _get_rarest_tokens(skel_tokens, skel_idf, k_tokens, freq_cap, skel_df)
+        rare = list(dict.fromkeys(rare + skel_rare))  # ordered dedup: set order varies per process
+    return rare
 
 
-def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
-                     idf: dict[str, float], country_df: dict[str, int],
-                     country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 2, top_k_per_query: int = 50) -> tuple[pl.LazyFrame, int]:
-    """Pass B: address blocking. Key = house_num + each of the rarest addr_street tokens.
+def build_name_index(s1_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
+                     skel_idf: dict[str, float], skel_df: dict[str, int], legal_skel: frozenset[str] = frozenset(),
+                     freq_cap: int = 2000, k_tokens: int = 3) -> Index:
+    """Pass A index, built once per country: rare name_core token (or skeleton token) -> [(s1_id, idf)].
 
-    Direction: S2/S3 → S1, within country.
-
-    Args:
-        s1_records: S1 records for this country.
-        query_records: S2/S3 records for this country.
-        idf: addr token → IDF scores.
-        country_df: addr token → document frequency.
-        country: country label.
-        freq_cap: skip tokens with DF > this.
-        k_tokens: number of rarest street tokens per record.
-        top_k_per_query: cap S1 candidates per query inside the pass to save memory.
-
-    Returns:
-        DataFrame with (cand_id, s1_id, score).
+    Skeleton tokens are always indexed for S1: the skeleton is the shared representation between Latin S1 names
+    and transliterated non-Latin S2/S3 names.
     """
-    # Build S1 inverted index: (house_num, street_token) → list of (s1_id, idf)
-    s1_index: dict[tuple[str, str], list[tuple[str, float]]] = {}
-
-    for row in s1_records.select("entity_id", "house_num", "addr_street", "addr_norm").iter_rows(named=True):
-        house = row["house_num"] or ""
-        if not house:
-            continue
-        street = row["addr_street"] or ""
-        street_tokens = street.split()
-        if not street_tokens:
-            norm = row.get("addr_norm") or ""
-            street_tokens = [t for t in norm.split() if t != house and t.lstrip("0") != house]
-        rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)
-
-        for token in rare:
-            key = (house, token)
-            if key not in s1_index:
-                s1_index[key] = []
-            s1_index[key].append((row["entity_id"], idf.get(token, 10.0)))
-
-    # Query S2/S3 records
-    chunk_files = []
-    total_pairs = 0
-    chunk_size = 50_000
-    n_chunks = max(1, math.ceil(query_records.height / chunk_size))
-
-    for i in range(n_chunks):
-        pairs: list[tuple[str, str, float]] = []
-        chunk = query_records.slice(i * chunk_size, chunk_size)
-
-        for row in chunk.select("entity_id", "house_num", "addr_street", "addr_norm").iter_rows(named=True):
-            house = row["house_num"] or ""
-            if not house:
-                continue
-            street = row["addr_street"] or ""
-            street_tokens = street.split()
-            if not street_tokens:
-                norm = row.get("addr_norm") or ""
-                street_tokens = [t for t in norm.split() if t != house and t.lstrip("0") != house]
-            rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)
-
-            s1_scores: dict[str, float] = {}
-            for token in rare:
-                key = (house, token)
-                if key in s1_index:
-                    for s1_id, token_idf in s1_index[key]:
-                        s1_scores[s1_id] = s1_scores.get(s1_id, 0.0) + token_idf
-
-            if s1_scores:
-                top_k = min(top_k_per_query, len(s1_scores))
-                for s1_id in heapq.nlargest(top_k, s1_scores, key=s1_scores.get):
-                    pairs.append((row["entity_id"], s1_id, s1_scores[s1_id]))
-
-        if pairs:
-            chunk_df = pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
-            total_pairs += chunk_df.height
-            chunk_path = out_dir / f"addr_pass_{i}.parquet"
-            chunk_df.write_parquet(chunk_path)
-            chunk_files.append(chunk_path)
-
-    if not chunk_files:
-        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64}).lazy(), 0
-
-    return pl.scan_parquet([str(p) for p in chunk_files]), total_pairs
+    index: Index = {}
+    for row in s1_records.select("entity_id", "name_core", "name_skeleton", "name_script").iter_rows(named=True):
+        for token in _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=True,
+                                legal_skel=legal_skel):
+            index.setdefault(token, []).append((row["entity_id"], idf.get(token, skel_idf.get(token, 10.0))))
+    return index
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# §4  PASS C — HOUSE NUMBER BLOCKING
-# ═══════════════════════════════════════════════════════════════════════════════
+def query_name_index(index: Index, query_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
+                     skel_idf: dict[str, float], skel_df: dict[str, int], legal_skel: frozenset[str] = frozenset(),
+                     freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 50) -> pl.DataFrame:
+    """Pass A on a chunk of S2/S3 records: each record retrieves its top S1s by the summed IDF of shared rare tokens.
 
-
-def house_num_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
-                   idf: dict[str, float], country_df: dict[str, int],
-                   country: str, out_dir: Path, freq_cap: int = 50) -> tuple[pl.LazyFrame, int]:
-    """Pass C: house-number-only blocking for distinctive house numbers.
-
-    Direction: S2/S3 → S1, within country.
-    Only indexes/queries house numbers with document frequency <= freq_cap
-    to prevent Cartesian explosion on common numbers like '1', '2', '10'.
-
-    Args:
-        s1_records: S1 records for this country.
-        query_records: S2/S3 records for this country.
-        idf: house_num → IDF scores.
-        country_df: house_num → document frequency.
-        country: country label.
-        freq_cap: skip house numbers appearing in > freq_cap records.
-
-    Returns:
-        DataFrame with (cand_id, s1_id, score).
+    Direction S2/S3 -> S1, within one country. Returns (cand_id, s1_id, score).
     """
-    s1_index: dict[str, list[tuple[str, float]]] = {}
+    pairs = []
+    for row in query_records.select("entity_id", "name_core", "name_skeleton", "name_script").iter_rows(named=True):
+        keys = _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=False,
+                          legal_skel=legal_skel)
+        pairs += [(row["entity_id"], s1, sc) for s1, sc in _top_scores(index, keys, top_k_per_query)]
+    return _pairs_frame(pairs)
 
+
+def _street_keys(row: dict, idf: dict[str, float], country_df: dict[str, int], freq_cap: int,
+                 k_tokens: int) -> list[tuple[str, str]]:
+    """(number, rare street token) keys for EVERY number in the address (addr_nums, not only house_num), so a
+    spurious extra number ('818 F-25', 'No. 337 1/598') does not hide the real one; [] when there is no number."""
+    nums = list(dict.fromkeys(n for n in (row["addr_nums"] or []) if n))
+    if not nums:
+        return []
+    street_tokens = (row["addr_street"] or "").split()
+    if not street_tokens:
+        num_set = set(nums)
+        street_tokens = [t for t in (row["addr_norm"] or "").split() if t not in num_set and t.lstrip("0") not in num_set]
+    rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)
+    return [(n, t) for n in nums for t in rare]
+
+
+def build_address_index(s1_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
+                        freq_cap: int = 2000, k_tokens: int = 2) -> Index:
+    """Pass B index, built once per country: (any address number, rare street token) -> [(s1_id, idf)]."""
+    index: Index = {}
+    for row in s1_records.select("entity_id", "addr_nums", "addr_street", "addr_norm").iter_rows(named=True):
+        for key in _street_keys(row, idf, country_df, freq_cap, k_tokens):
+            index.setdefault(key, []).append((row["entity_id"], idf.get(key[1], 10.0)))
+    return index
+
+
+def query_address_index(index: Index, query_records: pl.DataFrame, idf: dict[str, float],
+                        country_df: dict[str, int], freq_cap: int = 2000, k_tokens: int = 2,
+                        top_k_per_query: int = 50) -> pl.DataFrame:
+    """Pass B on a chunk of S2/S3 records: S1s sharing any address number + a rare street token.
+    (cand_id, s1_id, score)."""
+    pairs = []
+    for row in query_records.select("entity_id", "addr_nums", "addr_street", "addr_norm").iter_rows(named=True):
+        keys = _street_keys(row, idf, country_df, freq_cap, k_tokens)
+        pairs += [(row["entity_id"], s1, sc) for s1, sc in _top_scores(index, keys, top_k_per_query)]
+    return _pairs_frame(pairs)
+
+
+def build_house_index(s1_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
+                      freq_cap: int = 50) -> Index:
+    """Pass C index, built once per country: distinctive house number (doc freq <= freq_cap) -> [(s1_id, idf)].
+
+    The cap prevents a Cartesian explosion on common numbers like '1', '2', '10'.
+    """
+    index: Index = {}
     for row in s1_records.select("entity_id", "house_num").iter_rows(named=True):
         house = row["house_num"] or ""
-        if not house or country_df.get(house, 0) > freq_cap:
-            continue
-        if house not in s1_index:
-            s1_index[house] = []
-        s1_index[house].append((row["entity_id"], idf.get(house, 5.0)))
+        if house and country_df.get(house, 0) <= freq_cap:
+            index.setdefault(house, []).append((row["entity_id"], idf.get(house, 5.0)))
+    return index
 
-    chunk_files = []
-    total_pairs = 0
-    chunk_size = 200_000
-    n_chunks = max(1, math.ceil(query_records.height / chunk_size))
 
-    for i in range(n_chunks):
-        pairs: list[tuple[str, str, float]] = []
-        chunk = query_records.slice(i * chunk_size, chunk_size)
-
-        for row in chunk.select("entity_id", "house_num").iter_rows(named=True):
-            house = row["house_num"] or ""
-            if not house or country_df.get(house, 0) > freq_cap or house not in s1_index:
-                continue
-            for s1_id, score in s1_index[house]:
-                pairs.append((row["entity_id"], s1_id, score))
-
-        if pairs:
-            chunk_df = pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
-            total_pairs += chunk_df.height
-            chunk_path = out_dir / f"house_pass_{i}.parquet"
-            chunk_df.write_parquet(chunk_path)
-            chunk_files.append(chunk_path)
-
-    if not chunk_files:
-        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64}).lazy(), 0
-
-    return pl.scan_parquet([str(p) for p in chunk_files]), total_pairs
+def query_house_index(index: Index, query_records: pl.DataFrame, country_df: dict[str, int],
+                      freq_cap: int = 50) -> pl.DataFrame:
+    """Pass C on a chunk of S2/S3 records: every S1 with the same distinctive house number. (cand_id, s1_id, score)."""
+    pairs = []
+    for row in query_records.select("entity_id", "house_num").iter_rows(named=True):
+        house = row["house_num"] or ""
+        if house and country_df.get(house, 0) <= freq_cap:
+            pairs += [(row["entity_id"], s1, sc) for s1, sc in index.get(house, ())]
+    return _pairs_frame(pairs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

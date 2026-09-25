@@ -1,4 +1,4 @@
-"""Union of blocking passes with a provenance bitmask; caps candidates per S1 at max_cands.
+"""Streaming union of blocking passes with a provenance bitmask; re-rank; per-record cut; per-S1 safety cap.
 
 Contract:
 In: outputs of keys / tfidf_knn / embed_knn.
@@ -20,14 +20,19 @@ import polars as pl
 from rapidfuzz import fuzz
 
 from ber.blocking.keys import (
-    address_key_pass,
+    build_address_index,
+    build_house_index,
+    build_name_index,
     compute_df_counts,
     compute_token_idf,
-    house_num_pass,
-    name_token_pass,
+    query_address_index,
+    query_house_index,
+    query_name_index,
 )
+from ber import rules
 from ber.config import Config
 from ber.features.pairwise import cpdist
+from ber.normalize import _normalize_base, name_skeleton
 
 # Pass bit assignments (bitmask)
 PASS_NAME_TOKEN = 0    # bit 0 (1 << 0 = 1)
@@ -76,34 +81,47 @@ def rank_scores(pairs: pl.DataFrame, records: pl.DataFrame) -> pl.Series:
     return pl.Series("rank_score", np.concatenate(out) if out else np.empty(0), dtype=pl.Float64)
 
 
-def _merge_passes(pass_results: list[tuple[pl.LazyFrame, int]]) -> pl.LazyFrame:
-    """Merge the blocking passes of one country into (s1_id, cand_id, block_mask, block_score).
+RANK_BY, RANK_DESC = ["rank_score", "block_score", "s1_id", "cand_id"], [True, True, False, False]
+RECORD_COLS = ["entity_id", "source", "country", "name_skeleton", "name_script", "name_core",
+               "house_num", "addr_nums", "addr_street", "addr_norm"]
+EMPTY_CANDIDATES = {"s1_id": pl.String, "cand_id": pl.String, "block_mask": pl.Int32, "block_score": pl.Float64,
+                    "rank_score": pl.Float64, "country": pl.String, "rank_in_cand": pl.Int32}
 
-    Each pass scores on its own scale, so its score is first normalized to 0-1 within the country
-    (score / that pass's max score). block_mask ORs the pass bits; block_score = sum of the normalized
-    pass scores (0 to n_passes).
 
-    Args:
-        pass_results: list of (lazy_pairs, bit_position) where lazy_pairs has (cand_id, s1_id, score) for one country.
+def _merge_passes(raw: pl.DataFrame, pass_max: dict[int, float]) -> pl.DataFrame:
+    """Merge raw pass hits (cand_id, s1_id, score, bit) into (s1_id, cand_id, block_mask, block_score).
 
-    Returns:
-        LazyFrame with (s1_id, cand_id, block_mask, block_score).
+    Each pass scores on its own scale, so its score is first normalized to 0-1 by ``pass_max[bit]`` (that pass's
+    max score over the whole country, so every chunk is scaled the same way). block_mask ORs the pass bits;
+    block_score = sum of the normalized pass scores (0 to n_passes).
     """
-    if not pass_results:
-        return pl.DataFrame(schema={
-            "s1_id": pl.String, "cand_id": pl.String,
-            "block_mask": pl.Int32, "block_score": pl.Float64,
-        }).lazy()
-    merged = pl.concat([
-        lazy_pairs.select("s1_id", "cand_id",
-                          score=(pl.col("score").cast(pl.Float64) / pl.col("score").max()).fill_nan(0.0),
-                          bit_val=pl.lit(1 << bit, dtype=pl.Int32))
-        for lazy_pairs, bit in pass_results
-    ])
-    return merged.group_by("s1_id", "cand_id").agg(
-        block_mask=pl.col("bit_val").bitwise_or(),
-        block_score=pl.col("score").sum().round(9),   # round: group_by sum order varies -> last-bit noise flips ties
-    )
+    bits, maxes = list(pass_max), [float(pass_max[b]) for b in pass_max]
+    return (raw.with_columns(score=(pl.col("score").cast(pl.Float64)
+                                    / pl.col("bit").replace_strict(bits, maxes, return_dtype=pl.Float64)).fill_nan(0.0),
+                             bit_val=pl.col("bit").replace_strict(list(PASS_NAMES), [1 << b for b in PASS_NAMES],
+                                                               return_dtype=pl.Int32))
+            .group_by("s1_id", "cand_id").agg(
+                block_mask=pl.col("bit_val").bitwise_or(),
+                block_score=pl.col("score").sum().round(9),   # round: group_by sum order varies -> last-bit noise
+            ))
+
+
+def _rank_per_cand(candidates: pl.DataFrame, k_per_query: int, min_score: float | None = None) -> pl.DataFrame:
+    """Rank the S1s of every cand_id (RANK_BY) -> rank_in_cand, then keep rank_in_cand <= k_per_query.
+
+    rank_in_cand is computed on the full retrieval list of the cand_id, BEFORE min_score / k_per_query remove
+    anything. Needs every pair of a cand_id in ``candidates`` (true for a chunk of query records).
+    """
+    ranked = (candidates.sort(RANK_BY, descending=RANK_DESC)
+              .with_columns(rank_in_cand=(pl.int_range(pl.len()).over("cand_id") + 1).cast(pl.Int32)))
+    if min_score:
+        ranked = ranked.filter(pl.col("block_score") >= min_score)
+    return ranked.filter(pl.col("rank_in_cand") <= k_per_query)
+
+
+def _cap_per_s1(candidates: pl.DataFrame, max_cands: int) -> pl.DataFrame:
+    """Per-S1 safety cap: keep each S1's best ``max_cands`` candidates (same RANK_BY order)."""
+    return candidates.sort(RANK_BY, descending=RANK_DESC).filter(pl.int_range(pl.len()).over("s1_id") < max_cands)
 
 
 def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
@@ -112,7 +130,7 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
 
     Ordering everywhere: rank_score desc, block_score desc, s1_id asc, cand_id asc (deterministic ties).
     rank_in_cand (1 = best S1 for this cand_id) is computed on the full retrieval list, BEFORE min_score /
-    k_per_query / max_cands remove anything.
+    k_per_query / max_cands remove anything. build_candidates applies the same two steps chunk by chunk.
 
     Args:
         candidates: DataFrame with (s1_id, cand_id, block_mask, block_score, rank_score).
@@ -123,154 +141,114 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
     Returns:
         Capped DataFrame with an added rank_in_cand column.
     """
-    ranked = (
-        candidates
-        .sort(["rank_score", "block_score", "s1_id", "cand_id"], descending=[True, True, False, False])
-        .with_columns(rank_in_cand=(pl.int_range(pl.len()).over("cand_id") + 1).cast(pl.Int32))
-    )
-    if min_score:
-        ranked = ranked.filter(pl.col("block_score") >= min_score)
-    return (
-        ranked
-        .filter(pl.col("rank_in_cand") <= k_per_query)
-        .filter(pl.int_range(pl.len()).over("s1_id") < max_cands)   # same ordering, frame is still sorted
-    )
+    return _cap_per_s1(_rank_per_cand(candidates, k_per_query, min_score), max_cands)
+
+
+def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int, k_per_query: int,
+                   min_score: float | None) -> list[Path]:
+    """Stream one country: S1 indexes built once, S2/S3 queried in chunks of ``chunk_rows`` records.
+
+    Phase 1: every pass runs on each chunk; raw hits go to disk and the per-pass max score is tracked.
+    Phase 2: each chunk is normalized with the country-wide pass maxima, merged, re-ranked (rank_score) and cut to
+    the top ``k_per_query`` S1s per cand_id; the (small) result goes to disk. Returns the result files.
+    Memory is bounded by the chunk (+ the country's S1 indexes), not by the country's pair count.
+    """
+    s1_recs, query_recs = recs.filter(pl.col("source") == 1), recs.filter(pl.col("source") > 1)
+    print(f"\n  -- {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 --")
+    if s1_recs.height == 0 or query_recs.height == 0:
+        return []
+    name_idf, name_df = compute_token_idf(recs, "name_core", country), compute_df_counts(recs, "name_core", country)
+    skel_idf = compute_token_idf(recs, "name_skeleton", country)
+    skel_df = compute_df_counts(recs, "name_skeleton", country)
+    addr_idf, addr_df = compute_token_idf(recs, "addr_norm", country), compute_df_counts(recs, "addr_norm", country)
+    house_idf, house_df = compute_token_idf(recs, "house_num", country), compute_df_counts(recs, "house_num", country)
+    t = time.time()
+    legal_skel = frozenset(t for form in rules.legal_forms(country) for t in name_skeleton(_normalize_base(form)).split())
+    name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel)
+    addr_index = build_address_index(s1_recs, addr_idf, addr_df)
+    house_index = build_house_index(s1_recs, house_idf, house_df)
+    print(f"    indexes built in {time.time() - t:.1f}s")
+
+    raw_files, pass_max, n_raw = [], {}, 0
+    for i, lo in enumerate(range(0, query_recs.height, chunk_rows)):  # chunks of records, not rows
+        part = query_recs.slice(lo, chunk_rows)
+        raw = pl.concat([
+            query_name_index(name_index, part, name_idf, name_df, skel_idf, skel_df, legal_skel)
+            .with_columns(bit=PASS_NAME_TOKEN),
+            query_address_index(addr_index, part, addr_idf, addr_df).with_columns(bit=PASS_ADDR_KEY),
+            query_house_index(house_index, part, house_df).with_columns(bit=PASS_HOUSE_NUM),
+        ]).with_columns(pl.col("bit").cast(pl.Int8))
+        for bit, mx in raw.group_by("bit").agg(pl.col("score").max()).iter_rows():
+            pass_max[bit] = max(pass_max.get(bit, 0.0), mx)
+        n_raw += raw.height
+        raw_files.append(tmp / f"{country}_raw_{i:05d}.parquet")
+        raw.write_parquet(raw_files[-1])
+    del name_index, addr_index, house_index
+    print(f"    phase 1: {n_raw:,} raw pass hits in {len(raw_files)} chunks ({time.time() - t:.1f}s)")
+
+    rank_recs = recs.select("entity_id", *RANK_FIELDS)
+    kept_files, n_merged, n_kept = [], 0, 0
+    for i, path in enumerate(raw_files):
+        merged = _merge_passes(pl.read_parquet(path), pass_max)
+        merged = merged.with_columns(rank_scores(merged, rank_recs), country=pl.lit(country))
+        kept = _rank_per_cand(merged, k_per_query, min_score)
+        n_merged, n_kept = n_merged + merged.height, n_kept + kept.height
+        kept_files.append(tmp / f"{country}_kept_{i:05d}.parquet")
+        kept.write_parquet(kept_files[-1])
+        path.unlink()
+    print(f"    phase 2: {n_merged:,} unique pairs re-ranked, {n_kept:,} kept (k={k_per_query}) "
+          f"({time.time() - t:.1f}s)")
+    return kept_files
 
 
 def build_candidates(cfg: Config, split: str, subworld: bool = False,
                      k_per_query: int | None = None, max_cands: int | None = None) -> None:
-    """Build candidates_{split}.parquet from records_{split}.parquet.
+    """Build candidates_{split}.parquet from records_{split}.parquet, streaming per country and per chunk.
 
-    Runs blocking passes (name tokens + address keys + house numbers) per country,
-    merges, caps, and writes the §4 candidates artifact.
+    Per country: S1 indexes once, S2/S3 in chunks of ``blocking.chunk_rows`` (default 50k): passes -> union ->
+    rank_score -> top ``blocking.k_per_query`` per cand_id -> disk. Then the per-S1 ``max_cands`` safety cap on the
+    concatenated (small) result. Only the columns blocking needs are read, one country at a time.
     """
     t0 = time.time()
-    records = pl.read_parquet(cfg.artifact("records", split, subworld))
-    print(f"[block] loaded {records.height:,} records, split={split}")
-
-    countries = sorted(records["country"].unique().to_list())
-    print(f"  countries: {countries}")
-
-    all_candidates = []
-
-    for country in countries:
-        tc = time.time()
-        country_recs = records.filter(pl.col("country") == country)
-        s1_recs = country_recs.filter(pl.col("source") == 1)
-        query_recs = country_recs.filter(pl.col("source") > 1)
-
-        print(f"\n  -- {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 --")
-
-        if s1_recs.height == 0 or query_recs.height == 0:
-            continue
-
-        # Compute IDF for name tokens
-        print(f"    computing name token IDF...")
-        name_idf = compute_token_idf(country_recs, "name_tokens", country)
-        name_df = compute_df_counts(country_recs, "name_tokens", country)
-
-        # Compute IDF for skeleton tokens
-        print(f"    computing skeleton token IDF...")
-        skel_idf = compute_token_idf(country_recs, "name_skeleton", country)
-        skel_df = compute_df_counts(country_recs, "name_skeleton", country)
-
-        # Compute IDF for address tokens on addr_norm (so all street & area tokens have accurate IDF)
-        print(f"    computing addr token IDF...")
-        addr_idf = compute_token_idf(country_recs, "addr_norm", country)
-        addr_df = compute_df_counts(country_recs, "addr_norm", country)
-
-        # Compute IDF for house numbers
-        print(f"    computing house num IDF...")
-        house_idf = compute_token_idf(country_recs, "house_num", country)
-        house_df = compute_df_counts(country_recs, "house_num", country)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            out_dir = Path(tmp)
-            pass_results = []
-
-            # Pass A: name token blocking
-            print(f"    Pass A: name token blocking...")
-            name_pairs, name_cnt = name_token_pass(s1_recs, query_recs, name_idf, name_df, skel_idf, skel_df, country, out_dir,
-                                         freq_cap=2000, k_tokens=3)
-            print(f"      {name_cnt:,} pairs from name tokens")
-            if name_cnt > 0:
-                pass_results.append((name_pairs, PASS_NAME_TOKEN))
-
-            # Pass B: address key blocking (house_num + rare street token)
-            print(f"    Pass B: address key blocking...")
-            addr_pairs, addr_cnt = address_key_pass(s1_recs, query_recs, addr_idf, addr_df, country, out_dir,
-                                          freq_cap=2000, k_tokens=2)
-            print(f"      {addr_cnt:,} pairs from address keys")
-            if addr_cnt > 0:
-                pass_results.append((addr_pairs, PASS_ADDR_KEY))
-
-            # Pass C: house number blocking
-            print(f"    Pass C: house number blocking...")
-            house_pairs, house_cnt = house_num_pass(s1_recs, query_recs, house_idf, house_df, country, out_dir,
-                                         freq_cap=50)
-            print(f"      {house_cnt:,} pairs from house numbers")
-            if house_cnt > 0:
-                pass_results.append((house_pairs, PASS_HOUSE_NUM))
-
-            # Merge passes lazily then collect
-            merged_lazy = _merge_passes(pass_results)
-            merged_lazy = merged_lazy.with_columns(country=pl.lit(country))
-            merged = merged_lazy.collect()
-            print(f"    merged: {merged.height:,} unique pairs, "
-                  f"{merged['s1_id'].n_unique():,} S1s with candidates")
-
-        all_candidates.append(merged)
-        print(f"    {country} done in {time.time() - tc:.1f}s")
-
-    if not all_candidates:
-        candidates = pl.DataFrame(schema={
-            "s1_id": pl.String, "cand_id": pl.String, "country": pl.String,
-            "block_mask": pl.Int32, "block_score": pl.Float64,
-        })
-    else:
-        candidates = pl.concat(all_candidates)
-
-    print(f"\n  total merged: {candidates.height:,} pairs")
-
-    # Re-rank every retrieved pair (union of passes, before any cap) with cheap similarities
-    t_rank = time.time()
-    candidates = candidates.with_columns(rank_scores(candidates, records))
-    print(f"  rank_score for {candidates.height:,} pairs in {time.time() - t_rank:.1f}s")
-
-    # Cap candidates: keep top k_per_query per query, cap at max_cands per S1
-    if max_cands is None:
-        max_cands = cfg.max_cands
-    if k_per_query is None:
-        k_per_query = int(cfg.get("blocking.k_per_query", 2))
+    path = cfg.artifact("records", split, subworld)
+    countries = sorted(pl.scan_parquet(path).select(pl.col("country").unique()).collect()["country"].to_list())
+    print(f"[block] split={split}, countries: {countries}")
+    max_cands = cfg.max_cands if max_cands is None else max_cands
+    k_per_query = int(cfg.get("blocking.k_per_query", 2)) if k_per_query is None else k_per_query
     min_score = cfg.get("blocking.min_score", None)   # None or 0 = off
-    print(f"  capping: k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}")
-    candidates = _cap_candidates(candidates, k_per_query=k_per_query, max_cands=max_cands, min_score=min_score)
-    print(f"  after capping: {candidates.height:,} pairs, "
-          f"{candidates['s1_id'].n_unique():,} S1s")
+    chunk_rows = int(cfg.get("blocking.chunk_rows", 50_000))
+    print(f"  k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}, chunk_rows={chunk_rows}")
 
-    # Add contract columns (tfidf_name, tfidf_full, knn_rank filled with null for now)
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=cfg.cache_dir, prefix="tmp_block_", ignore_cleanup_errors=True) as tmp:
+        kept_files = []
+        for country in countries:  # countries, not rows
+            tc = time.time()
+            recs = pl.scan_parquet(path).filter(pl.col("country") == country).select(RECORD_COLS).collect()
+            kept_files += _block_country(recs, country, Path(tmp), chunk_rows, k_per_query, min_score)
+            del recs
+            print(f"    {country} done in {time.time() - tc:.1f}s")
+        candidates = (pl.concat([pl.read_parquet(f) for f in kept_files]) if kept_files
+                      else pl.DataFrame(schema=EMPTY_CANDIDATES))
+
+    candidates = _cap_per_s1(candidates, max_cands)
     candidates = candidates.with_columns(
-        tfidf_name=pl.lit(None, dtype=pl.Float64),
+        tfidf_name=pl.lit(None, dtype=pl.Float64),   # contract columns, not produced by these passes
         tfidf_full=pl.lit(None, dtype=pl.Float64),
         knn_rank=pl.lit(None, dtype=pl.Int32),
-    )
-
-    # Reorder columns to match §4 contract
-    candidates = candidates.select(
+    ).select(
         "s1_id", "cand_id", "country", "block_mask",
         "tfidf_name", "tfidf_full", "knn_rank", "rank_in_cand", "block_score", "rank_score",
     ).sort(["s1_id", "rank_score", "cand_id"], descending=[False, True, False])
 
-    # Write output
     out_path = cfg.artifact("candidates", split, subworld)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     candidates.write_parquet(out_path)
 
-    # Report summary stats
     per_s1 = candidates.group_by("s1_id").len()["len"]
-    runtime = time.time() - t0
     print(f"\n[block] wrote {candidates.height:,} candidate pairs to {out_path}")
     print(f"  S1s with candidates: {candidates['s1_id'].n_unique():,}")
-    print(f"  candidates per S1: mean={per_s1.mean():.1f}, median={per_s1.median():.0f}, "
-          f"p95={per_s1.quantile(0.95):.0f}, max={per_s1.max()}")
-    print(f"  runtime: {runtime:.1f}s")
+    if candidates.height:
+        print(f"  candidates per S1: mean={per_s1.mean():.1f}, median={per_s1.median():.0f}, "
+              f"p95={per_s1.quantile(0.95):.0f}, max={per_s1.max()}")
+    print(f"  runtime: {time.time() - t0:.1f}s")

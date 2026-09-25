@@ -2,7 +2,7 @@
 seed: 42
 n_folds: 5
 subworld_frac: 0.1       # fraction of S1 entities in a closed sub-world (fast loop, CLAUDE.md §6)
-max_cands: 10            # cap on candidates per S1 after merging blocking passes
+max_cands: 50            # per-S1 safety net only: k_per_query per S2/S3 record already bounds S1 lists (~k x 4.68)
 decision_margin: 0.0     # extra conservatism in set selection; tuned with LB feedback (test is denser)
 
 blocking:

@@ -19,37 +19,19 @@ from pathlib import Path
 import joblib
 import numpy as np
 import polars as pl
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.isotonic import IsotonicRegression
 
 from ber.config import Config
+from ber.features.pairwise import cpdist
+from ber.features.structured import house_num_relation, legal_conflict
 
 SCORES_NAME = "scores_fallback"
 HN_RELATIONS = ["equal", "one_missing", "both_missing", "different"]
 NUMERIC = ["block_score", "rank_in_cand", "hn_absdiff_log", "name_tset", "name_ratio", "street_ratio",
            "legal_conflict", "hn_rel_code"]
 CHUNK = 2_000_000  # pairs per rapidfuzz batch (bounds the Python string lists)
-
-
-def house_num_relation(a: str | pl.Expr, b: str | pl.Expr) -> tuple[pl.Expr, pl.Expr]:
-    """House-number relation of two ``house_num`` columns and the absolute numeric difference.
-
-    Relation: ``equal`` / ``one_missing`` / ``both_missing`` / ``different`` (after stripping leading zeros).
-    The difference uses the first digit run of each side; null when either side has no digits.
-    """
-    a, b = (pl.col(x) if isinstance(x, str) else x for x in (a, b))
-    a, b = a.fill_null("").str.strip_chars_start("0"), b.fill_null("").str.strip_chars_start("0")
-    rel = (pl.when((a == "") & (b == "")).then(pl.lit("both_missing"))
-           .when((a == "") | (b == "")).then(pl.lit("one_missing"))
-           .when(a == b).then(pl.lit("equal")).otherwise(pl.lit("different")))
-    num = lambda x: x.str.extract(r"(\d+)").cast(pl.Int64, strict=False)  # noqa: E731
-    return rel, (num(a) - num(b)).abs()
-
-
-def _cpdist(a: list[str], b: list[str], scorer) -> np.ndarray:
-    """Element-wise rapidfuzz scores in [0, 1] for two equal-length string lists (multithreaded)."""
-    return process.cpdist(a, b, scorer=scorer, workers=-1, dtype=np.float32) / 100.0
 
 
 def pair_features(candidates: pl.DataFrame, records: pl.DataFrame) -> pl.DataFrame:
@@ -65,16 +47,15 @@ def pair_features(candidates: pl.DataFrame, records: pl.DataFrame) -> pl.DataFra
     df = df.with_columns(
         hn_rel=rel,
         hn_absdiff_log=diff.cast(pl.Float64).log1p().fill_null(-1.0),
-        legal_conflict=((pl.col("s1_legal") != "") & (pl.col("c_legal") != "")
-                        & (pl.col("s1_legal") != pl.col("c_legal"))).cast(pl.Float32),
+        legal_conflict=legal_conflict("s1_legal", "c_legal"),
     ).with_columns(hn_rel_code=pl.col("hn_rel").replace_strict(HN_RELATIONS, list(range(4)), return_dtype=pl.Int8))
     sims = {k: np.empty(df.height, np.float32) for k in ("name_tset", "name_ratio", "street_ratio")}
     for lo in range(0, df.height, CHUNK):  # chunks of pairs, not rows
         part = df.slice(lo, CHUNK)
         s1c, cc = part["s1_core"].to_list(), part["c_core"].to_list()
-        sims["name_tset"][lo:lo + part.height] = _cpdist(s1c, cc, fuzz.token_set_ratio)
-        sims["name_ratio"][lo:lo + part.height] = _cpdist(s1c, cc, fuzz.ratio)
-        sims["street_ratio"][lo:lo + part.height] = _cpdist(part["s1_street"].to_list(), part["c_street"].to_list(),
+        sims["name_tset"][lo:lo + part.height] = cpdist(s1c, cc, fuzz.token_set_ratio)
+        sims["name_ratio"][lo:lo + part.height] = cpdist(s1c, cc, fuzz.ratio)
+        sims["street_ratio"][lo:lo + part.height] = cpdist(part["s1_street"].to_list(), part["c_street"].to_list(),
                                                             fuzz.ratio)
     return df.with_columns(**{k: pl.Series(v) for k, v in sims.items()}).select(
         "s1_id", "cand_id", "country", "hn_rel", *NUMERIC)

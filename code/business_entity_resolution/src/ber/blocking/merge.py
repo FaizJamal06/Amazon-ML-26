@@ -144,7 +144,8 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
     return _cap_per_s1(_rank_per_cand(candidates, k_per_query, min_score), max_cands)
 
 
-PASS_LIMITS = {"name_freq_cap": 2000, "addr_freq_cap": 2000, "house_freq_cap": 50, "top_k_per_query": 50}
+PASS_LIMITS = {"name_freq_cap": 2000, "addr_freq_cap": 2000, "house_freq_cap": 50, "top_k_per_query": 50,
+               "name_pair_keys": 0}  # name_pair_keys: 1 = also key on pairs of frequent name tokens (keys._pair_keys)
 
 
 def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int, k_per_query: int,
@@ -169,7 +170,7 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
     t = time.time()
     legal_skel = frozenset(t for form in rules.legal_forms(country) for t in name_skeleton(_normalize_base(form)).split())
     name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel,
-                                  freq_cap=lim["name_freq_cap"])
+                                  freq_cap=lim["name_freq_cap"], pair_keys=bool(lim["name_pair_keys"]))
     addr_index = build_address_index(s1_recs, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"])
     house_index = build_house_index(s1_recs, house_idf, house_df, freq_cap=lim["house_freq_cap"])
     print(f"    indexes built in {time.time() - t:.1f}s")
@@ -179,7 +180,8 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
         part = query_recs.slice(lo, chunk_rows)
         raw = pl.concat([
             query_name_index(name_index, part, name_idf, name_df, skel_idf, skel_df, legal_skel,
-                             freq_cap=lim["name_freq_cap"], top_k_per_query=lim["top_k_per_query"])
+                             freq_cap=lim["name_freq_cap"], top_k_per_query=lim["top_k_per_query"],
+                             pair_keys=bool(lim["name_pair_keys"]))
             .with_columns(bit=PASS_NAME_TOKEN),
             query_address_index(addr_index, part, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"],
                                 top_k_per_query=lim["top_k_per_query"]).with_columns(bit=PASS_ADDR_KEY),

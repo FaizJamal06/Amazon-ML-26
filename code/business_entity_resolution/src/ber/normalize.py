@@ -245,7 +245,10 @@ def normalize_name(raw_name: str, country: str) -> dict[str, str | list[str]]:
     name_norm = " ".join(tokens)
 
     # Extract legal form
-    legal_table = rules.legal_forms(country)
+legal_table = {
+        _normalize_base(form): canonical
+        for form, canonical in rules.legal_forms(country).items()
+    }
     core_tokens, legal_form = _extract_legal_form(tokens, legal_table)
     name_core = " ".join(core_tokens)
 

@@ -5,7 +5,8 @@ Usage (from the repo root):  python code/business_entity_resolution/scripts/smok
 
 World: --n-s1 S1s sampled per country (seed 42) + all their GT matches + unmatched S2/S3 records (matched to no S1 in
 the full GT) sampled per country so that (S2+S3)/S1 equals the full train ratio of that country. Written as
-source{1,2,3}_train + gt_train into cache/smoke/ (git-ignored); every stage runs with --set paths.cache_dir=cache/smoke.
+source{1,2,3}_train + gt_train into --cache-dir (default cache/smoke, git-ignored); every stage runs with
+--set paths.cache_dir=<that folder>. --ks / --no-uncapped / --block-set control the block runs (big worlds).
 Then: normalize once; block + blocking-report for each blocking.k_per_query in KS; one uncapped block run (to tell
 "retrieved but ranked out" from "no pass retrieved it"). Prints per-country / per-script recall, all-matches-found
 share, candidates per S1, runtime + peak RAM, the count of each miss category and --n-missed example misses.
@@ -75,10 +76,10 @@ def build_world(cfg, n_s1: int, seed: int) -> None:
           f"{gt_w.height:,} GT pairs -> {out}")
 
 
-def stage(name: str, *extra: str) -> tuple[str, float, float]:
+def stage(name: str, cache_dir: str, *extra: str) -> tuple[str, float, float]:
     """Run one pipeline stage on the smoke cache in a fresh process; return (stdout, seconds, peak MB)."""
     res = subprocess.run([sys.executable, "-m", "ber.pipeline", name, "--split", "train",
-                          "--set", "paths.cache_dir=cache/smoke", *extra], cwd=PKG / "src", capture_output=True,
+                          "--set", f"paths.cache_dir={cache_dir}", *extra], cwd=PKG / "src", capture_output=True,
                          text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if res.returncode:
         raise SystemExit(f"{name} failed:\n{res.stdout[-3000:]}\n{res.stderr[-3000:]}")
@@ -103,14 +104,20 @@ def metrics(cand: pl.DataFrame, gt: pl.DataFrame, groups: pl.DataFrame) -> pl.Da
         per_s1.select(group=pl.lit("ALL"), **agg)])
 
 
-def missed_pairs(cand: pl.DataFrame, uncapped: pl.DataFrame, gt: pl.DataFrame, rec: pl.DataFrame,
+def missed_pairs(cand: pl.DataFrame, uncapped: pl.DataFrame | None, gt: pl.DataFrame, rec: pl.DataFrame,
                  n: int, seed: int) -> str:
     """Count of all GT pairs missing from ``cand`` per category ("no pass retrieved it" vs "retrieved but ranked out")
-    + ``n`` random examples: raw strings of both sides + what the passes did for the candidate."""
+    + ``n`` random examples: raw strings of both sides + what the passes did for the candidate.
+    Without an uncapped run only the total and the raw strings are reported."""
     miss = gt.join(cand.select("s1_id", match_id="cand_id"), on=["s1_id", "match_id"], how="anti")
-    n_out = miss.join(uncapped.select("s1_id", match_id="cand_id"), on=["s1_id", "match_id"], how="semi").height
-    head = (f"All {miss.height:,} misses: {miss.height - n_out:,} no pass retrieved it, {n_out:,} retrieved but "
-            f"ranked out (per-record k or per-S1 cap).")
+    if uncapped is None:
+        head = f"All {miss.height:,} misses (no uncapped run: categories not available)."
+        uncapped = pl.DataFrame(schema={"s1_id": pl.String, "cand_id": pl.String, "block_mask": pl.Int32,
+                                        "rank_in_cand": pl.Int32})
+    else:
+        n_out = miss.join(uncapped.select("s1_id", match_id="cand_id"), on=["s1_id", "match_id"], how="semi").height
+        head = (f"All {miss.height:,} misses: {miss.height - n_out:,} no pass retrieved it, {n_out:,} retrieved but "
+                f"ranked out (per-record k or per-S1 cap).")
     miss = miss.sample(min(n, miss.height), seed=seed)
     raw = rec.select("entity_id", "country", "name_raw", "addr_raw", "name_script", "house_num")
     passes = lambda m: "+".join(v for b, v in PASS_NAMES.items() if m >> b & 1) or "-"  # noqa: E731
@@ -136,37 +143,47 @@ def main() -> None:
     ap.add_argument("--rebuild", action="store_true", help="rebuild the world even if the smoke sources exist")
     ap.add_argument("--skip-normalize", action="store_true", help="reuse cached records_train (blocking-only change)")
     ap.add_argument("--n-missed", type=int, default=20, help="example missed pairs to print (default 20)")
+    ap.add_argument("--cache-dir", default="cache/smoke", help="smoke cache folder, relative to the repo root")
+    ap.add_argument("--ks", default=",".join(map(str, KS)), help="k_per_query values to sweep (default 1,2,3,5)")
+    ap.add_argument("--no-uncapped", action="store_true", help="skip the uncapped block run (big worlds)")
+    ap.add_argument("--block-set", action="append", default=[], metavar="KEY=VALUE",
+                    help="extra --set for every block run, e.g. blocking.chunk_rows=25000 (repeatable)")
     args = ap.parse_args()
-    cfg = load_config(sets=["paths.cache_dir=cache/smoke"])
+    ks = [int(k) for k in args.ks.split(",")]
+    block_sets = [x for s in args.block_set for x in ("--set", s)]
+    cfg = load_config(sets=[f"paths.cache_dir={args.cache_dir}"])
     if args.rebuild or not cfg.artifact("source1", "train").exists():
         build_world(cfg, args.n_s1, cfg.seed)
-    out = [f"# Smoke: real-data blocking, {args.n_s1:,} S1/country\n", CAVEAT, ""]
+    out = [f"# Smoke: real-data blocking, {args.n_s1:,} S1/country ({args.cache_dir})\n", CAVEAT, ""]
     runs = []
     if not (args.skip_normalize and cfg.artifact("records", "train").exists()):
-        _, t, mb = stage("normalize")
+        _, t, mb = stage("normalize", args.cache_dir)
         runs.append(("normalize", "-", t, mb))
     rec, gt = pl.read_parquet(cfg.artifact("records", "train")), pl.read_parquet(cfg.artifact("gt", "train"))
     groups = s1_groups(rec, gt)
-    _, t, mb = stage("block", *UNCAPPED)
-    runs.append(("block", "uncapped", t, mb))
-    uncapped = pl.read_parquet(cfg.artifact("candidates", "train"))
-    tables, cands = [("uncapped", metrics(uncapped, gt, groups))], {}
-    for k in KS:
-        _, t, mb = stage("block", "--set", f"blocking.k_per_query={k}")
+    tables, cands, uncapped = [], {}, None
+    if not args.no_uncapped:
+        _, t, mb = stage("block", args.cache_dir, *UNCAPPED, *block_sets)
+        runs.append(("block", "uncapped", t, mb))
+        uncapped = pl.read_parquet(cfg.artifact("candidates", "train"))
+        tables.append(("uncapped", metrics(uncapped, gt, groups)))
+    for k in ks:
+        _, t, mb = stage("block", args.cache_dir, "--set", f"blocking.k_per_query={k}", *block_sets)
         runs.append(("block", f"k={k}", t, mb))
         cands[k] = pl.read_parquet(cfg.artifact("candidates", "train"))
         tables.append((f"k={k}", metrics(cands[k], gt, groups)))
-        report, _, _ = stage("blocking-report")
+        report, _, _ = stage("blocking-report", args.cache_dir)
         out += [f"## blocking-report, k_per_query={k}", report.split("\n", 1)[1].rsplit("\n[blocking-report]", 1)[0]]
+    k_miss = 2 if 2 in cands else ks[0]
     sweep = pl.concat([tb.select(pl.lit(k).alias("k"), pl.all()) for k, tb in tables])
     with pl.Config(tbl_rows=100, tbl_cols=-1, tbl_width_chars=200, float_precision=4, tbl_formatting="MARKDOWN",
                    tbl_hide_dataframe_shape=True, tbl_hide_column_data_types=True):
         text = [f"## Sweep (max_cands={cfg.max_cands})", str(sweep), "", "## Runtime / peak RAM",
                 str(pl.DataFrame(runs, schema=["stage", "run", "seconds", "peak_MB"], orient="row")), "",
-                f"## Missed GT pairs at k=2 (default), {args.n_missed} examples",
-                missed_pairs(cands[2], uncapped, gt, rec, args.n_missed, cfg.seed)]
+                f"## Missed GT pairs at k={k_miss}, {args.n_missed} examples",
+                missed_pairs(cands[k_miss], uncapped, gt, rec, args.n_missed, cfg.seed)]
     print("\n".join([CAVEAT, "", *text]))
-    path = cfg.path("reports_dir") / "smoke_real_blocking.md"
+    path = cfg.path("reports_dir") / f"smoke_real_blocking_{Path(args.cache_dir).name}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(out[:3] + text + [""] + out[3:]), encoding="utf-8")
     print(f"\nfull report -> {path}")

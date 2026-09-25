@@ -19,9 +19,15 @@ from ber.pipeline import main  # noqa: E402
 REC_COLS = ["entity_id", "name_core", "name_skeleton", "addr_street", "house_num"]
 
 
-def _pass(rows: list[tuple[str, str, float]]) -> pl.LazyFrame:
+def _pass(rows: list[tuple[str, str, float]]) -> pl.DataFrame:
     """One pass's output: (cand_id, s1_id, score) rows."""
-    return pl.DataFrame(rows, schema=["cand_id", "s1_id", "score"], orient="row").lazy()
+    return pl.DataFrame(rows, schema=["cand_id", "s1_id", "score"], orient="row")
+
+
+def _merge(passes: list[tuple[pl.DataFrame, int]]) -> pl.DataFrame:
+    """Raw hits of several passes (one country) -> merged pairs, normalized by each pass's max, like build_candidates."""
+    raw = pl.concat([p.with_columns(bit=pl.lit(bit, pl.Int8)) for p, bit in passes])
+    return _merge_passes(raw, dict(raw.group_by("bit").agg(pl.col("score").max()).iter_rows()))
 
 
 def _cands(rows: list[tuple[str, str, float, float]]) -> pl.DataFrame:
@@ -35,7 +41,7 @@ def test_merge_normalizes_each_pass():
     passes = [(_pass([("c1", "A", 3.0), ("c9", "Z", 10.0)]), PASS_NAME_TOKEN),
               (_pass([("c1", "A", 2.0), ("c9", "Z", 4.0)]), PASS_ADDR_KEY),
               (_pass([("c1", "B", 9.0)]), PASS_HOUSE_NUM)]
-    a = _merge_passes(passes).collect().filter(pl.col("s1_id") == "A")
+    a = _merge(passes).filter(pl.col("s1_id") == "A")
     assert a["block_mask"][0] == 0b011 and abs(a["block_score"][0] - (0.3 + 0.5)) < 1e-9
 
 
@@ -46,7 +52,7 @@ def test_exact_name_same_street_outranks_shared_house_number():
                         ("A", "anand food", "anand fud", "mg road", ""),
                         ("B", "vijay textiles", "vijay textils", "station road", "12")], schema=REC_COLS, orient="row")
     passes = [(_pass([("c1", "A", 3.0), ("c9", "A", 10.0)]), PASS_NAME_TOKEN), (_pass([("c1", "B", 9.0)]), PASS_HOUSE_NUM)]
-    merged = _merge_passes(passes).collect().filter(pl.col("cand_id") == "c1")
+    merged = _merge(passes).filter(pl.col("cand_id") == "c1")
     merged = merged.with_columns(rank_scores(merged, rec))
     score = dict(merged.select("s1_id", "rank_score").rows())
     assert abs(score["A"] - 0.90) < 1e-6 and score["B"] < 0.5, score
@@ -81,7 +87,7 @@ def test_ties_are_deterministic():
 
 def test_config_k_per_query_is_honored():
     """normalize + block on a stub world: --set blocking.k_per_query=1 gives fewer pairs than the default (2),
-    and every kept rank_in_cand is <= k."""
+    and every kept rank_in_cand is <= k. Streaming in tiny chunks (7 query records) gives the identical output."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         cache = Path(d)
         rec, _, _ = stub.build_split("train", ["US", "India"], 30, np.random.default_rng(42))
@@ -96,8 +102,11 @@ def test_config_k_per_query_is_honored():
             k2 = pl.read_parquet(cache / "candidates_train.parquet")
             main(["block", "--split", "train", *sets, "--set", "blocking.k_per_query=1"])
             k1 = pl.read_parquet(cache / "candidates_train.parquet")
+            main(["block", "--split", "train", *sets, "--set", "blocking.chunk_rows=7"])
+            k2_small_chunks = pl.read_parquet(cache / "candidates_train.parquet")
     assert k2["rank_in_cand"].max() == 2 and k1["rank_in_cand"].max() == 1
     assert k1.height < k2.height
+    assert k2_small_chunks.equals(k2)
 
 
 if __name__ == "__main__":

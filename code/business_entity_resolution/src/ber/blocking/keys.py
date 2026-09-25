@@ -189,12 +189,15 @@ def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
     # Build S1 inverted index: (house_num, street_token) → list of (s1_id, idf)
     s1_index: dict[tuple[str, str], list[tuple[str, float]]] = {}
 
-    for row in s1_records.select("entity_id", "house_num", "addr_street").iter_rows(named=True):
+    for row in s1_records.select("entity_id", "house_num", "addr_street", "addr_norm").iter_rows(named=True):
         house = row["house_num"] or ""
         if not house:
             continue
         street = row["addr_street"] or ""
         street_tokens = street.split()
+        if not street_tokens:
+            norm = row.get("addr_norm") or ""
+            street_tokens = [t for t in norm.split() if t != house and t.lstrip("0") != house]
         rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)
 
         for token in rare:
@@ -206,12 +209,15 @@ def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
     # Query S2/S3 records
     pairs: list[tuple[str, str, float]] = []
 
-    for row in query_records.select("entity_id", "house_num", "addr_street").iter_rows(named=True):
+    for row in query_records.select("entity_id", "house_num", "addr_street", "addr_norm").iter_rows(named=True):
         house = row["house_num"] or ""
         if not house:
             continue
         street = row["addr_street"] or ""
         street_tokens = street.split()
+        if not street_tokens:
+            norm = row.get("addr_norm") or ""
+            street_tokens = [t for t in norm.split() if t != house and t.lstrip("0") != house]
         rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)
 
         s1_scores: dict[str, float] = {}
@@ -231,7 +237,57 @@ def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §4  HELPERS
+# §4  PASS C — HOUSE NUMBER BLOCKING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def house_num_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
+                   idf: dict[str, float], country_df: dict[str, int],
+                   country: str, freq_cap: int = 50) -> pl.DataFrame:
+    """Pass C: house-number-only blocking for distinctive house numbers.
+
+    Direction: S2/S3 → S1, within country.
+    Only indexes/queries house numbers with document frequency <= freq_cap
+    to prevent Cartesian explosion on common numbers like '1', '2', '10'.
+
+    Args:
+        s1_records: S1 records for this country.
+        query_records: S2/S3 records for this country.
+        idf: house_num → IDF scores.
+        country_df: house_num → document frequency.
+        country: country label.
+        freq_cap: skip house numbers appearing in > freq_cap records.
+
+    Returns:
+        DataFrame with (cand_id, s1_id, score).
+    """
+    s1_index: dict[str, list[tuple[str, float]]] = {}
+
+    for row in s1_records.select("entity_id", "house_num").iter_rows(named=True):
+        house = row["house_num"] or ""
+        if not house or country_df.get(house, 0) > freq_cap:
+            continue
+        if house not in s1_index:
+            s1_index[house] = []
+        s1_index[house].append((row["entity_id"], idf.get(house, 5.0)))
+
+    pairs: list[tuple[str, str, float]] = []
+
+    for row in query_records.select("entity_id", "house_num").iter_rows(named=True):
+        house = row["house_num"] or ""
+        if not house or country_df.get(house, 0) > freq_cap or house not in s1_index:
+            continue
+        for s1_id, score in s1_index[house]:
+            pairs.append((row["entity_id"], s1_id, score))
+
+    if not pairs:
+        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64})
+
+    return pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# §5  HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 

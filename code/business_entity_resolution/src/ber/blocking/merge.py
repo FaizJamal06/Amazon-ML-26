@@ -17,17 +17,20 @@ from ber.blocking.keys import (
     address_key_pass,
     compute_df_counts,
     compute_token_idf,
+    house_num_pass,
     name_token_pass,
 )
 from ber.config import Config
 
 # Pass bit assignments (bitmask)
-PASS_NAME_TOKEN = 0    # bit 0
-PASS_ADDR_KEY = 1      # bit 1
+PASS_NAME_TOKEN = 0    # bit 0 (1 << 0 = 1)
+PASS_ADDR_KEY = 1      # bit 1 (1 << 1 = 2)
+PASS_HOUSE_NUM = 2     # bit 2 (1 << 2 = 4)
 
 PASS_NAMES: dict[int, str] = {
     PASS_NAME_TOKEN: "name_token",
     PASS_ADDR_KEY: "addr_key",
+    PASS_HOUSE_NUM: "house_num",
 }
 
 
@@ -62,7 +65,7 @@ def _merge_passes(pass_results: list[tuple[pl.DataFrame, int]]) -> pl.DataFrame:
         merged
         .group_by("s1_id", "cand_id")
         .agg(
-            block_mask=pl.col("bit_val").sum(),  # sum works as OR when bits are disjoint
+            block_mask=pl.col("bit_val").bitwise_or(),
             block_score=pl.col("score").max(),
         )
     )
@@ -70,8 +73,8 @@ def _merge_passes(pass_results: list[tuple[pl.DataFrame, int]]) -> pl.DataFrame:
     return result
 
 
-def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 10,
-                    max_cands: int = 50) -> pl.DataFrame:
+def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 4,
+                    max_cands: int = 15) -> pl.DataFrame:
     """Cap candidates: per S2/S3 keep top k S1s, then per S1 cap at max_cands by block_score.
 
     Args:
@@ -119,11 +122,12 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 10,
     return capped
 
 
-def build_candidates(cfg: Config, split: str, subworld: bool = False) -> None:
+def build_candidates(cfg: Config, split: str, subworld: bool = False,
+                     k_per_query: int = 4, max_cands: int | None = None) -> None:
     """Build candidates_{split}.parquet from records_{split}.parquet.
 
-    Runs blocking passes (name tokens + address keys) per country, merges,
-    caps, and writes the §4 candidates artifact.
+    Runs blocking passes (name tokens + address keys + house numbers) per country,
+    merges, caps, and writes the §4 candidates artifact.
     """
     t0 = time.time()
     records = pl.read_parquet(cfg.artifact("records", split, subworld))
@@ -150,10 +154,15 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False) -> None:
         name_idf = compute_token_idf(country_recs, "name_tokens", country)
         name_df = compute_df_counts(country_recs, "name_tokens", country)
 
-        # Compute IDF for address tokens
+        # Compute IDF for address tokens on addr_norm (so all street & area tokens have accurate IDF)
         print(f"    computing addr token IDF...")
-        addr_idf = compute_token_idf(country_recs, "addr_street", country)
-        addr_df = compute_df_counts(country_recs, "addr_street", country)
+        addr_idf = compute_token_idf(country_recs, "addr_norm", country)
+        addr_df = compute_df_counts(country_recs, "addr_norm", country)
+
+        # Compute IDF for house numbers
+        print(f"    computing house num IDF...")
+        house_idf = compute_token_idf(country_recs, "house_num", country)
+        house_df = compute_df_counts(country_recs, "house_num", country)
 
         pass_results = []
 
@@ -164,12 +173,19 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False) -> None:
         print(f"      {name_pairs.height:,} pairs from name tokens")
         pass_results.append((name_pairs, PASS_NAME_TOKEN))
 
-        # Pass B: address key blocking
+        # Pass B: address key blocking (house_num + rare street token)
         print(f"    Pass B: address key blocking...")
         addr_pairs = address_key_pass(s1_recs, query_recs, addr_idf, addr_df, country,
                                       freq_cap=2000, k_tokens=2)
         print(f"      {addr_pairs.height:,} pairs from address keys")
         pass_results.append((addr_pairs, PASS_ADDR_KEY))
+
+        # Pass C: house number blocking
+        print(f"    Pass C: house number blocking...")
+        house_pairs = house_num_pass(s1_recs, query_recs, house_idf, house_df, country,
+                                     freq_cap=50)
+        print(f"      {house_pairs.height:,} pairs from house numbers")
+        pass_results.append((house_pairs, PASS_HOUSE_NUM))
 
         # Merge passes
         merged = _merge_passes(pass_results)
@@ -190,9 +206,9 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False) -> None:
 
     print(f"\n  total merged: {candidates.height:,} pairs")
 
-    # Cap candidates
-    k_per_query = 10
-    max_cands = cfg.max_cands
+    # Cap candidates: keep top k_per_query per query, cap at max_cands per S1
+    if max_cands is None:
+        max_cands = min(getattr(cfg, "max_cands", 15), 15)
     print(f"  capping: k_per_query={k_per_query}, max_cands={max_cands}")
     candidates = _cap_candidates(candidates, k_per_query=k_per_query, max_cands=max_cands)
     print(f"  after capping: {candidates.height:,} pairs, "

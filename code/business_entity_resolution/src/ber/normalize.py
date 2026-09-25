@@ -432,10 +432,16 @@ def compute_area_tokens(records: pl.DataFrame, threshold_frac: float = 0.15) -> 
     return area_tokens
 
 
-def remove_area_tokens(addr_street: str, area_set: set[str]) -> str:
-    """Remove area tokens from addr_street to get a cleaner street representation."""
+def remove_area_tokens(addr_street: str, area_set: set[str], min_tokens: int = 1) -> str:
+    """Remove area tokens from addr_street to get a cleaner street representation.
+
+    If filtering out area tokens leaves fewer than *min_tokens*, fall back to the
+    original addr_street so we don't leave addr_street too sparse or empty.
+    """
     tokens = addr_street.split()
     filtered = [t for t in tokens if t not in area_set]
+    if len(filtered) < min_tokens:
+        return addr_street
     return " ".join(filtered)
 
 
@@ -508,7 +514,12 @@ def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
             print(f"  warning: {path} not found, skipping")
 
     if not frames:
-        raise FileNotFoundError(f"No source parquets found for split={split}")
+        out_path = cfg.artifact("records", split, subworld)
+        if out_path.exists():
+            print(f"  warning: no source parquets found, but {out_path} exists; keeping existing")
+            return
+        print(f"  warning: no source parquets found for split={split}, skipping")
+        return
 
     raw = pl.concat(frames)
     print(f"  {raw.height:,} raw records across {len(frames)} sources")

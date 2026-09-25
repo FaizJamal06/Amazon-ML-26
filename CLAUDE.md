@@ -133,6 +133,11 @@ docs/   MODELS.md  Documentation_template.md (filled at the end)
 - `features_{split}.parquet`: `s1_id, cand_id, <feature columns>, label (train/val only)`
 - `scores_{split}.parquet`: `s1_id, cand_id, p` (calibrated)
 - `folds_train.parquet`: `s1_id, fold (0–4), country, n_matches`
+- `gt_train.parquet`: `s1_id, match_id` — long ground truth, one row per matched pair (S1s without matches have no row;
+  the S1 universe comes from `records_train.parquet`). Built by `ber.eval.metric.gt_long` from the raw GT at ingest.
+- `subworld_train.parquet`: `entity_id, source, role` (`s1` | `match` | `decoy`) — the closed sub-world (§6);
+  `--subworld` stages read `*_train_sw.parquet` artifacts restricted to these ids.
+- Stub versions of `records_*`, `candidates_*`, `gt_train` live in `cache/stub/` (`scripts/make_stub_data.py`).
 - `split ∈ {train, test}`; train artifacts carry the fold via a join on `s1_id`. `--subworld F` restricts to a closed
   sub-world of fraction F (§6) for fast loops.
 

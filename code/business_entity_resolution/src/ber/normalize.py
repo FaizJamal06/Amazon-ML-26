@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import re
+import shutil
 import unicodedata
 from collections import Counter
 from typing import Sequence
@@ -532,7 +533,8 @@ def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
         return
 
     chunk_size = 100_000
-    tmp_dir = cfg.data_dir / "cache" / "tmp_normalize"
+    tmp_dir = cfg.cache_dir / f"tmp_normalize_{split}{'_sw' if subworld else ''}"
+    shutil.rmtree(tmp_dir, ignore_errors=True)  # stale chunks from an earlier run would be globbed into the output
     tmp_dir.mkdir(parents=True, exist_ok=True)
     chunk_files = []
     
@@ -614,6 +616,7 @@ def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
     
     # Get total count
     total_records = pl.scan_parquet(out_path).select(pl.len()).collect().item()
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     print(f"  wrote {total_records:,} records to {out_path}")
 
     # Show examples

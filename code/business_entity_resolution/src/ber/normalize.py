@@ -93,7 +93,9 @@ def transliterate(text: str) -> str:
 
 
 # Regex: numbers with possible internal slashes/dashes (e.g. 12/3, 45-a, 6800)
-_NUM_INSIDE_RE = re.compile(r"\d+-[a-zA-Z]\b|\d[\d/\-a-zA-Z]*\d|\d+")
+# Ordinals (1st/2nd/3rd/12th) are kept whole: split as "3 rd", the "rd" was expanded to "road" ("3rd cross" ->
+# "3 road cross") and the ordinal became a fake leading house number.
+_NUM_INSIDE_RE = re.compile(r"\d+(?:st|nd|rd|th)\b|\d+-[a-zA-Z]\b|\d[\d/\-a-zA-Z]*\d|\d+", re.IGNORECASE)
 
 # Strip punctuation EXCEPT inside numbers like 12/3
 _PUNCT_RE = re.compile(r"[^\w\s]")
@@ -304,6 +306,11 @@ _HOUSE_PREFIX_RE = re.compile(
 )
 
 
+_NUM_TOKEN_RE = re.compile(r"\d[\d/\-]*[a-z]?")          # a standalone number token (fullmatch)
+_ORDINAL_RE = re.compile(r"\d+(?:st|nd|rd|th)")          # 1st, 2nd, 3rd, 12th (fullmatch)
+_FALLBACK_NON_HOUSE = {"sector", "block", "phase", "ward", "stage", "lane", "apt", "apartment", "suite", "ste", "unit"}
+
+
 def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
     """Extract the primary house number and all numbers from a normalized address.
 
@@ -347,6 +354,19 @@ def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
         before = addr_norm[:house_start].strip().split()
         if before and before[-1].lower() in non_house:
             house_num = ""
+
+    # Strategy 3 (only when no marker and no leading number): first standalone number token anywhere, e.g.
+    # "tn mt juliet 2005 carphilly court" (component order rotated) -> "2005"; skips numbers after a non-house marker,
+    # ordinals and numbers followed by cross/main.
+    if house_start == -1:
+        tokens = addr_norm.split()
+        for i, tok in enumerate(tokens):
+            if (not _NUM_TOKEN_RE.fullmatch(tok) or _ORDINAL_RE.fullmatch(tok)
+                    or (i > 0 and tokens[i - 1] in _FALLBACK_NON_HOUSE)
+                    or (i + 1 < len(tokens) and tokens[i + 1] in ("cross", "main"))):
+                continue
+            house_num = tok.lstrip("0") or "0"
+            break
 
     return house_num, all_nums
 

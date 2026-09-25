@@ -57,6 +57,20 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(name_fields["legal_form"], "private limited")
         self.assertEqual(name_fields["name_core"], "xyz")
 
+    def test_house_num_fallback_first_standalone_number(self):
+        # No marker and no leading number: first standalone number not after a non-house marker, not an ordinal,
+        # not followed by cross/main
+        from ber.normalize import normalize_address
+        cases = {("TN, Mt. Juliet, 2005 Carphilly Court", "US"): "2005", ("Sector 4, Pune", "India"): "",
+                 ("123 Main St Suite 200", "US"): "123", ("Apt 5, Main St", "US"): "",
+                 ("3rd Cross, 45 MG Road", "India"): "45"}
+        for (addr, country), expected in cases.items():
+            self.assertEqual(normalize_address(addr, country)["house_num"], expected, addr)
+
+    def test_ordinals_stay_whole(self):
+        # "3rd" used to become "3 rd" -> "3 road" (abbreviation expansion) and a fake leading house number
+        self.assertEqual(_normalize_base("3rd Cross, 1st Main"), "3rd cross 1st main")
+
     def test_unknown_script(self):
         # Fix 4: Classify unknown scripts as non-Latin (Other)
         from ber.normalize import detect_script

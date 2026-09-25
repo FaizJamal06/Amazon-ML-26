@@ -5,6 +5,10 @@ subworld_frac: 0.1       # fraction of S1 entities in a closed sub-world (fast l
 max_cands: 50            # cap on candidates per S1 after merging blocking passes
 decision_margin: 0.0     # extra conservatism in set selection; tuned with LB feedback (test is denser)
 
+decide:
+  threshold: 0.5         # v1 global threshold on calibrated p after one-to-one assignment (tuned on OOF)
+  grid: [0.30, 0.95, 0.05]   # start, stop (inclusive), step for the OOF threshold sweep
+
 paths:
   data_dir: student_resource/dataset
   train:

@@ -3,11 +3,11 @@ numpy==2.5.3
 pandas==3.0.6
 pyarrow==25.0.1
 rapidfuzz==3.14.6
+pyyaml==6.0.3
+polars==1.44.2
 
 # Planned — pin the exact version when first added:
-# polars==
 # duckdb==
 # scikit-learn==
 # lightgbm==
 # anyascii==
-# pyyaml==

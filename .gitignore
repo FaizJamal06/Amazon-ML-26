@@ -10,9 +10,8 @@ student_resource/
 data/
 cache/
 artifacts/
-# ...except the two submission files
-!output/
-!output/*.tsv
+# submission files are hundreds of MB -> stored on Drive/S3, tracked by sha256 in notes/SUBMISSIONS.md
+output/
 
 # --- models & weights ---
 models/

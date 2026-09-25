@@ -5,12 +5,13 @@ In: student_resource/dataset/{train,test}/*.tsv read with sep='\\t', dtype=str, 
 Out: parquet caches under cache/; output/matching_results.tsv and output/candidate_pairs.tsv
 (tab-separated, no quoting, no index, no BOM, comma-joined ids without spaces).
 
-Owner: ingest — Chris (R4); submission writer — Faiz (R1). Keep the two sections separate to avoid merge conflicts.
+Owner: ingest — Faiz (R1, covering Chris); submission writer — Faiz (R1). Keep the two sections separate to avoid merge conflicts.
 """
 from __future__ import annotations
 
 import hashlib
 import os
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -18,8 +19,82 @@ from pathlib import Path
 import polars as pl
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Ingest (Chris) — TSV -> parquet cache goes here.
+# Ingest (Faiz, covering Chris) — TSV -> parquet cache.
 # ---------------------------------------------------------------------------------------------------------------------
+# Row counts from notes/DATA_CONTEXT.md; ingest fails loudly on any difference (truncated copy, parser drift).
+EXPECTED_ROWS = {
+    "train": {"source1": 2_206_821, "source2": 5_034_616, "source3": 5_285_603, "ground_truth": 2_206_821,
+              "gt_pairs": 7_638_365},
+    "test": {"source1": 1_732_544, "source2": 4_887_273, "source3": 5_082_316},
+}
+PANDAS_SAMPLE = 2000
+
+
+def read_tsv(path: Path) -> pl.DataFrame:
+    """Read an official TSV like the mandated pandas call: all columns Utf8, empty strings kept, CSV quoting."""
+    return pl.read_csv(path, separator="\t", infer_schema=False, empty_string_is_null=False, quote_char='"')
+
+
+def _pandas_rows(path: Path, positions: list[int]) -> tuple[list[tuple], int, list[str]]:
+    """Rows at ``positions`` (0-based), total row count and header from the mandated pandas read, in chunks."""
+    import pandas as pd
+    keep, rows, n, cols = set(positions), {}, 0, None
+    for chunk in pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, chunksize=1_000_000):
+        hit = chunk[chunk.index.isin(keep)]
+        rows.update(zip(hit.index, hit.itertuples(index=False, name=None)))
+        n, cols = n + len(chunk), list(chunk.columns)
+    return [rows.get(i) for i in positions], n, cols
+
+
+def _check_table(path: Path, df: pl.DataFrame, n_expected: int | None, seed: int) -> str:
+    """Raise ValueError unless ``df`` has the expected rows, no nulls, no "\\r" in its last column (country / id list)
+    and ``PANDAS_SAMPLE`` random rows identical to the mandated pandas read. Returns a one-line report."""
+    pos = sorted(random.Random(seed).sample(range(df.height), min(PANDAS_SAMPLE, df.height)))
+    pd_rows, pd_n, pd_cols = _pandas_rows(path, pos)
+    checks = {
+        f"rows == {n_expected}": n_expected is None or df.height == n_expected,
+        f"pandas rows ({pd_n}) == polars rows": pd_n == df.height,
+        "header == pandas header": pd_cols == df.columns,
+        f"{len(pos)} sampled rows == pandas": pd_rows == df.select(pl.all().gather(pos)).rows(),
+        "0 nulls": sum(df.null_count().row(0)) == 0,
+        f'no "\\r" in {df.columns[-1]}': not df[df.columns[-1]].str.contains("\r", literal=True).any(),
+    }
+    bad = [k for k, ok in checks.items() if not ok]
+    if bad:
+        raise ValueError(f"ingest check failed for {path}: {bad} (got {df.height:,} rows)")
+    return f"{path.name}: {df.height:,} rows x {df.width} cols; {len(pos)} rows == pandas; 0 nulls; no CR - OK"
+
+
+def ingest(cfg, split: str, subworld: bool = False, expected: dict[str, int] | None = None) -> None:
+    """Raw TSVs -> ``source{1,2,3}_{split}`` parquet (raw columns as Utf8 + ``source`` Int8, zstd) and, for train,
+    ``gt_train`` (long ``s1_id, match_id`` via ``gt_long``). Every file passes ``_check_table`` before it is written;
+    ``expected`` replaces ``EXPECTED_ROWS[split]`` (tests). Prints a short report."""
+    from ber.eval.metric import gt_long
+    if subworld:
+        raise SystemExit("ingest reads the raw TSVs: run it without --subworld")
+    expected = EXPECTED_ROWS[split] if expected is None else expected
+    report, s1_ids = [], None
+    for s in (1, 2, 3):
+        path = cfg.path(f"{split}.source{s}")
+        df = read_tsv(path)
+        report.append(_check_table(path, df, expected.get(f"source{s}"), cfg.seed + s))
+        if s == 1:
+            s1_ids = set(df["entity_id"])
+        df.with_columns(source=pl.lit(s, pl.Int8)).write_parquet(cfg.artifact(f"source{s}", split), compression="zstd")
+        del df
+    if split == "train":
+        path = cfg.path("train.ground_truth")
+        raw = read_tsv(path)
+        report.append(_check_table(path, raw, expected.get("ground_truth"), cfg.seed))
+        gt = gt_long(raw)
+        n_pairs, n_s1 = gt.height, gt["s1_id"].n_unique()
+        if expected.get("gt_pairs") not in (None, n_pairs) or set(raw["source1_entity_id"]) != s1_ids:
+            raise ValueError(f"gt_train: {n_pairs:,} pairs (expected {expected.get('gt_pairs')}) "
+                             "or GT S1 ids != source1 ids")
+        gt.write_parquet(cfg.artifact("gt", split), compression="zstd")
+        report.append(f"gt_train: {n_pairs:,} pairs over {n_s1:,} matched S1s "
+                      f"({raw.height:,} GT rows = all S1s, {raw.height - n_s1:,} singletons) - OK")
+    print("\n".join(report))
 
 
 # ---------------------------------------------------------------------------------------------------------------------

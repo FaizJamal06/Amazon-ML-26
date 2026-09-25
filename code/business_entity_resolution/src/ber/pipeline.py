@@ -23,7 +23,7 @@ from ber.config import Config, load_config
 
 # stage -> (module, function, owner) for stages implemented in other owners' modules
 OWNER_STAGES: dict[str, tuple[str, str, str]] = {
-    "ingest": ("ber.io", "ingest", "Chris (R4)"),                          # raw TSV -> parquet (+ gt_train.parquet)
+    "ingest": ("ber.io", "ingest", "Faiz (R1)"),                 # raw TSV -> parquet (+ gt_train.parquet)
     "normalize": ("ber.normalize", "build_records", "Dhanishkaa (R2)"),    # -> records_{split}.parquet
     "block": ("ber.blocking.merge", "build_candidates", "Dhanishkaa (R2)"),  # -> candidates_{split}.parquet
     "featurize": ("ber.features", "build_features", "Nitish (R3)"),        # -> features_{split}.parquet

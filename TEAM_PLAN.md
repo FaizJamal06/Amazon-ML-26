@@ -34,7 +34,7 @@ Artifact names are the `cfg.artifact()` names from CLAUDE.md §4 (e.g. `candidat
 | Producer → Consumer | Artifact | Needed by (IST) | Until then |
 |---|---|---|---|
 | Faiz → all | merged `main`: config + `artifact()`, stub data script, contracts, metric, folds | ✅ done 15:30 | — |
-| Chris → Dhanishkaa, Faiz, Nitish | `source{1,2,3}_{train,test}`, `gt_train` parquet | 16:30 | work on stub data / a 100k-row slice |
+| Faiz (for Chris) → Dhanishkaa, Faiz, Nitish | `source{1,2,3}_{train,test}`, `gt_train` parquet | ✅ done Sat 26 Sep (`python -m ber.pipeline ingest --split {train,test}`) | — |
 | Dhanishkaa → Faiz | `records_train`, `candidates_train` (+`rank_in_cand`, `block_score`) | 19:00 | Faiz builds decide v2 + errors.py on stub |
 | Faiz → Nitish | `folds_train`, `subworld_train` (+ blocking report) | 19:30 (≤30 min after candidates) | Nitish develops features on stub |
 | Nitish → Faiz | `scores_train` (OOF, calibrated) + saved model + calibrator | 21:00 | Faiz tunes decide on stub |
@@ -45,7 +45,7 @@ Artifact names are the `cfg.artifact()` names from CLAUDE.md §4 (e.g. `candidat
 | Chris → Nitish (Day 3) | OOF cross-encoder score column | Sun 15:00 | LightGBM without it |
 
 **Shared-file rules**
-- `ber/io.py` has two sections: `ingest` (Chris) and the writer (Faiz). Edit only your own section.
+- `ber/io.py` has two sections: `ingest` (Faiz, took over from Chris) and the writer (Faiz). Edit only your own section.
 - `pipeline.py` belongs to Faiz; others expose functions with the documented signature, and Faiz wires them in.
 - `CLAUDE.md` §4 changes need a PR and a ping to the downstream owner.
 
@@ -82,7 +82,7 @@ Always read and write through `cfg.artifact(name, split, subworld)`.
 | Faiz | r1/decide-v2 ready for PR (stub-tested): fallback scorer → `scores_fallback`, `errors` report, decide v2 (ef05 exact/approx) + `compare-decide` | real candidates_train (19:00) for blocking report + sub-world; scores_train (21:00) for decide tuning | folds_train + subworld_train → Nitish ≤30 min after candidates; Submission 1 at 23:30 (fallback scorer if LightGBM is late) |
 | Dhanishkaa | normalization + blocking v1 | source parquet from Chris (16:30) | records_train + candidates_train by 19:00 |
 | Faiz (covering Nitish tonight) | R3 on `r3/features-lgbm`: features v1 (decoy-killers, pairwise, context, rarity) + LightGBM 5-fold OOF + isotonic, stub-tested end to end (validator PASS); handoff in `notes/HANDOFF_R3.md` | real `candidates_train` / `records_train` from Dhanishkaa | `scores_train` (OOF) within ~1 h of candidates; Nitish takes the branch back Sat 26 Sep |
-| Chris | AWS setup + ingest | — | source{1,2,3}_{train,test} + gt_train by 16:30; full test run by 22:30 |
+| Chris | **AWS runner** (ingest done by Faiz, merged to main) | — | full test run on the high-RAM box |
 
 Each person updates their row at every sync (13:00 / 19:00 / 23:00) and when a handoff lands.
 

@@ -163,11 +163,9 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
     print(f"\n  -- {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 --")
     if s1_recs.height == 0 or query_recs.height == 0:
         return []
-    name_idf, name_df = compute_token_idf(recs, "name_core", country), compute_df_counts(recs, "name_core", country)
-    skel_idf = compute_token_idf(recs, "name_skeleton", country)
-    skel_df = compute_df_counts(recs, "name_skeleton", country)
-    addr_idf, addr_df = compute_token_idf(recs, "addr_norm", country), compute_df_counts(recs, "addr_norm", country)
-    house_idf, house_df = compute_token_idf(recs, "house_num", country), compute_df_counts(recs, "house_num", country)
+    dfs = {c: compute_df_counts(recs, c, country) for c in ("name_core", "name_skeleton", "addr_norm", "house_num")}
+    idfs = {c: compute_token_idf(recs, c, country, df) for c, df in dfs.items()}  # idf from df: one pass per column
+    (name_idf, skel_idf, addr_idf, house_idf), (name_df, skel_df, addr_df, house_df) = idfs.values(), dfs.values()
     t = time.time()
     legal_skel = frozenset(t for form in rules.legal_forms(country) for t in name_skeleton(_normalize_base(form)).split())
     name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel,

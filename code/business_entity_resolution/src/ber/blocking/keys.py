@@ -20,52 +20,26 @@ import polars as pl
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def compute_token_idf(records: pl.DataFrame, column: str, country: str) -> dict[str, float]:
+def compute_token_idf(records: pl.DataFrame, column: str, country: str,
+                      df_counts: dict[str, int] | None = None) -> dict[str, float]:
     """Compute IDF for each token in *column* within a country.
 
-    IDF = log(N / df_t) where df_t = number of documents containing token t.
+    IDF = log(N / df_t) where df_t = number of documents containing token t and N = records of the country.
 
     Args:
-        records: DataFrame with 'entity_id', 'country', and *column* (list[str] or str).
+        records: DataFrame with 'country' and *column* (list[str] or str).
         column: Column name containing tokens (list[str]) or text (str to split).
         country: Country to filter on.
+        df_counts: the country's compute_df_counts result, if already computed (avoids a second pass).
 
     Returns:
         dict mapping token → IDF score.
     """
-    subset = records.filter(pl.col("country") == country)
-    n_docs = subset.height
-
+    n_docs = records.filter(pl.col("country") == country).height
     if n_docs == 0:
         return {}
-
-    # Explode tokens
-    if subset.schema[column] == pl.List(pl.String):
-        exploded = subset.select("entity_id", column).explode(column).rename({column: "token"})
-    else:
-        exploded = (
-            subset.select("entity_id", column)
-            .with_columns(pl.col(column).str.split(" ").alias("_tokens"))
-            .explode("_tokens")
-            .rename({"_tokens": "token"})
-            .select("entity_id", "token")
-        )
-
-    # Document frequency
-    df_counts = (
-        exploded
-        .filter(pl.col("token").is_not_null() & (pl.col("token") != ""))
-        .unique(["entity_id", "token"])
-        .group_by("token")
-        .agg(df=pl.len())
-    )
-
-    idf: dict[str, float] = {}
-    for row in df_counts.iter_rows():
-        token, df_val = row[0], row[1]
-        idf[token] = math.log(n_docs / max(df_val, 1))
-
-    return idf
+    df_counts = compute_df_counts(records, column, country) if df_counts is None else df_counts
+    return {token: math.log(n_docs / max(df_val, 1)) for token, df_val in df_counts.items()}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -230,38 +204,23 @@ def query_house_index(index: Index, query_records: pl.DataFrame, country_df: dic
 
 
 def compute_df_counts(records: pl.DataFrame, column: str, country: str) -> dict[str, int]:
-    """Compute document frequency (count of unique entities containing each token) within a country.
+    """Compute document frequency (count of records containing each token) within a country.
+
+    Tokens are de-duplicated per record (list.unique) before counting, so no (entity_id, token) table is built:
+    the transient memory is one token column instead of id + token pairs.
 
     Args:
-        records: DataFrame with 'entity_id', 'country', and *column*.
-        column: Column name containing tokens (list[str]) or text (str).
+        records: DataFrame with 'country' and *column*.
+        column: Column name containing tokens (list[str]) or text (str, split on spaces).
         country: Country to filter on.
 
     Returns:
         dict mapping token → count.
     """
-    subset = records.filter(pl.col("country") == country)
-
-    if subset.height == 0:
-        return {}
-
-    if subset.schema[column] == pl.List(pl.String):
-        exploded = subset.select("entity_id", column).explode(column).rename({column: "token"})
-    else:
-        exploded = (
-            subset.select("entity_id", column)
-            .with_columns(pl.col(column).str.split(" ").alias("_tokens"))
-            .explode("_tokens")
-            .rename({"_tokens": "token"})
-            .select("entity_id", "token")
-        )
-
-    df_counts = (
-        exploded
-        .filter(pl.col("token").is_not_null() & (pl.col("token") != ""))
-        .unique(["entity_id", "token"])
-        .group_by("token")
-        .agg(df=pl.len())
-    )
-
-    return {row[0]: row[1] for row in df_counts.iter_rows()}
+    col = pl.col(column)
+    tokens = col if records.schema[column] == pl.List(pl.String) else col.str.split(" ")
+    counts = (records.lazy().filter(pl.col("country") == country)
+              .select(tokens.list.unique().alias("token")).explode("token")
+              .filter(pl.col("token").is_not_null() & (pl.col("token") != ""))
+              .group_by("token").agg(df=pl.len()).collect())
+    return dict(zip(counts["token"].to_list(), counts["df"].to_list()))

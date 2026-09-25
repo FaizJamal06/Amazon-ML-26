@@ -1,0 +1,21 @@
+# Base config. Paths are relative to the repo root (ml26/). Override per run with a second yaml or CLI flags.
+seed: 42
+n_folds: 5
+subworld_frac: 0.1       # fraction of S1 entities in a closed sub-world (fast loop, CLAUDE.md §6)
+max_cands: 50            # cap on candidates per S1 after merging blocking passes
+decision_margin: 0.0     # extra conservatism in set selection; tuned with LB feedback (test is denser)
+
+paths:
+  data_dir: student_resource/dataset
+  train:
+    source1: student_resource/dataset/train/train_source1.tsv
+    source2: student_resource/dataset/train/train_source2.tsv
+    source3: student_resource/dataset/train/train_source3.tsv
+    ground_truth: student_resource/dataset/train/train_ground_truth.tsv
+  test:
+    source1: student_resource/dataset/test/test_source1.tsv
+    source2: student_resource/dataset/test/test_source2.tsv
+    source3: student_resource/dataset/test/test_source3.tsv
+  cache_dir: cache
+  output_dir: output
+  validator: student_resource/utils/validate_submission.py

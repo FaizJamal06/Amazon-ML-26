@@ -1,0 +1,1153 @@
+
+==============================================================================================================
+## TRAIN: source1 + ground truth   [t=0s]
+==============================================================================================================
+
+==============================================================================================================
+## PROFILE train_source1   [t=7s]
+==============================================================================================================
+rows=2,206,821  unique ids=2,206,821  prefixes={'S1-': 2206821}
+country counts: {'US': 1323633, 'India': 883188}  raw values: ["'US'", "'India'"]
+exact duplicate (name,address,country) rows under different ids: 0 (0.00%)
+
+missing / empty rate per column (overall):
+  entity_id         empty=0.000%
+  business_name     empty=0.000%
+  business_address  empty=0.000%
+  country           empty=0.000%
+
+rates per country (fraction of rows):
+country                India      US
+name_empty            0.0000  0.0000
+addr_empty            0.0000  0.0000
+name_placeholder      0.0000  0.0000
+addr_placeholder_tok  0.0000  0.0000
+name_indic            0.0000  0.0000
+addr_indic            0.0000  0.0000
+name_accent           0.0000  0.0000
+addr_accent           0.0006  0.0000
+name_upper            0.0000  0.0000
+addr_upper            0.0000  0.0000
+name_junk_prefix      0.0001  0.0014
+name_handle           0.0000  0.0004
+addr_near             0.1346  0.0001
+addr_zip_us           0.0005  0.0000
+addr_pin6             0.0002  0.0012
+addr_5digit           0.0019  0.1095
+addr_house_no         0.6565  0.9951
+addr_any_digit        0.9128  1.0000
+
+length distributions per country (chars / words / comma-parts):
+country              India         US
+name_len   count  883188.0  1323633.0
+           mean       26.4       22.5
+           std         7.6        7.4
+           min         5.0        3.0
+           5%         13.0       11.0
+           25%        21.0       17.0
+           50%        27.0       22.0
+           75%        32.0       27.0
+           95%        38.0       35.0
+           max       105.0       68.0
+addr_len   count  883188.0  1323633.0
+           mean       77.7       35.0
+           std        21.0        6.7
+           min        14.0       11.0
+           5%         47.0       26.0
+           25%        63.0       30.0
+           50%        76.0       34.0
+           75%        90.0       39.0
+           95%       116.0       48.0
+           max       256.0       93.0
+name_words count  883188.0  1323633.0
+           mean        3.7        3.4
+           std         0.8        1.0
+           min         2.0        1.0
+           5%          2.0        2.0
+           25%         3.0        3.0
+           50%         4.0        3.0
+           75%         4.0        4.0
+           95%         5.0        5.0
+           max        16.0       12.0
+addr_parts count  883188.0  1323633.0
+           mean        5.7        3.2
+           std         1.6        0.4
+           min         2.0        2.0
+           5%          3.0        3.0
+           25%         4.0        3.0
+           50%         5.0        3.0
+           75%         7.0        3.0
+           95%         9.0        4.0
+           max        19.0        4.0
+
+-- 10 random rows, country=India
+   entity_id                              business_name                                                                                                business_address country
+S1-342398849 Bangalore South Automotive Private Limited                                          C-901, Goyalco Orchid, Lakeview, Bangalore South, Bangalore, Karnataka   India
+S1-161024824                          IMY India Company                                  Plot No. 3, 3Rd Floor, Road No G7, Dlf Phase-1, Gurgaon Kty., Gurgaon, Haryana   India
+S1-811662659                  Software Pinnacle Tourism                                                3016/5, 1St Floor, Ranjit Nagar, New Delhi, Central Delhi, Delhi   India
+S1-111462453          One International Private Limited              Ghaziabad, Uttar Pradesh, 4F-Cs03, 4Th Floor Ansal Plaza, Sector-1, Vaishali, Ghaziabad, Ghaziabad   India
+S1-373538478             Triad Buildpro Private Limited                                     Room No. 5/435/C, Royal Wash Building, Ernad, Malappuram, Malapuram, Kerala   India
+S1-537856240                Super Power Private Limited 8Th Floor, A-805/806, Times Square Arcade-Ii, Nr Avalon Hotel, Opp Mann Party Plot, Daskroi, Ahmedabad, Gujarat   India
+S1-314869525                      Namrata Foods Pvt Ltd                                             C13, Grd Anuroop Chs, Samata, Pokhran Road No.1, Thane, Maharashtra   India
+S1-206158797                     Aurous Digital Limited                                         1201, Floor -12, Krypton, Tower, New Prabhadevi Rd, Mumbai, Maharashtra   India
+S1-424401145    Jagatguru Infra (India) Private Limited                                                   No.339, 27Th Main, Sector 2, Hsr Layout, Bangalore, Karnataka   India
+S1-557871322           Exult & Brothers Private Limited       Greater Noida, Uttar Pradesh, L1303, Ghaziabad, Stellar Jeevan, 13Th Flr, Sector-01, Balika Inter College   India
+
+   top name last-tokens (India): {'limited': 521776, 'ltd': 119398, 'llp': 38639, 'ltd.': 26539, 'co': 16953, 'trust': 7130, 'company': 6918, 'corp': 6833, 'corporation': 6770, 'group': 5924, 'society': 4869, 'clinic': 4778, 'associates': 4580, 'partners': 4564, 'care': 3755, 'school': 3404, 'center': 3203, 'foundation': 3198, 'india': 2532, 'technology': 2456}
+   top address last-components (India): {'Maharashtra': 161431, 'Delhi': 103887, 'Uttar Pradesh': 62138, 'Karnataka': 58993, 'Tamil Nadu': 53208, 'Gujarat': 48341, 'West Bengal': 47987, 'Telangana': 47118, 'Haryana': 30235, 'Kerala': 29717, 'Rajasthan': 27137, 'Bihar': 19176, 'Madhya Pradesh': 18970, 'Andhra Pradesh': 14638, 'Orissa': 11740, 'Punjab': 10949, 'Mumbai': 4430, 'New Delhi': 3580, 'Bangalore': 3337, 'Pune': 2684}
+   first address component is a region (== some last-component in top-60): 0.0931
+
+-- 10 random rows, country=US
+   entity_id                          business_name                      business_address country
+S1-593028719           Complete Health Ventures Inc       303 Middle Street, Parkdale, AR      US
+S1-974617635   Collins, Wendt & Garza Lakeshore LLC 176 Oak Grove Avenue, Springfield, MA      US
+ S1-32135936          Franco Interstate Montreal LP        11 Washington Street, Pana, IL      US
+S1-395173473 Dermatology Innovative Specialists LLC   10019 Revere Court, Kansas City, MO      US
+S1-257839393        Modern Creative Consultants LLC          1816 Lane Street, Topeka, KS      US
+S1-251545933                Donaldson Specialty Inc           AZ, Tempe, 1375 Miller Road      US
+S1-220455926           Henricks Highland Return Inc 2731 Deford Mill Road, Huntsville, AL      US
+S1-503166628                 Turner's Safe Software            UT, 5516 1350, South Ogden      US
+S1-293779879   Leena Sellers Tri-State Sumitomo LLC    4627 Sunnyslope Lane, Glendale, AZ      US
+S1-360047821                            Burton City         3950 58th Street, Chicago, IL      US
+
+   top name last-tokens (US): {'llc': 355725, 'inc': 190223, 'inc.': 48083, 'corp': 26928, 'group': 26754, 'pc': 25821, 'p.c.': 22040, 'l.l.c.': 21843, 'pllc': 20531, 'center': 19066, 'associates': 17585, 'lp': 16477, 'partners': 14787, 'clinic': 13329, 'care': 13090, 'co': 8238, 'corporation': 6770, 'holdings': 5915, 'company': 5398, 'church': 5113}
+   top address last-components (US): {'TX': 115380, 'NY': 88423, 'NC': 81671, 'OH': 73740, 'IL': 65443, 'TN': 51545, 'VA': 51494, 'MA': 48921, 'AZ': 48646, 'IN': 42758, 'WA': 36511, 'MD': 35030, 'CA': 32176, 'AL': 28185, 'WI': 27140, 'MN': 26963, 'OR': 25781, 'KY': 25353, 'AR': 23311, 'MO': 22356}
+   first address component is a region (== some last-component in top-60): 0.0696
+
+ground truth rows: 2,206,821 | columns: ['source1_entity_id', 'matched_entity_ids']
+rows with whitespace around ids / empty list items: 0 0
+duplicate source1_entity_id rows in GT: 0
+GT S1 ids not in train_source1: 0 | train_source1 ids not in GT: 0
+total matched pairs: 7,638,365 | by prefix: {'S3': 3944746, 'S2': 3693619}
+duplicate id inside one S1's list: 0
+
+==============================================================================================================
+## GROUND TRUTH: matches per S1 entity   [t=83s]
+==============================================================================================================
+      count    pct
+0    123247   5.58
+1    119157   5.40
+2    375212  17.00
+3    530841  24.05
+4    484115  21.94
+5    321957  14.59
+6    164868   7.47
+7     63968   2.90
+8     18680   0.85
+9      4205   0.19
+10+     571   0.03
+
+singletons: 5.58%  | mean matches=3.46  max=11
+
+per country (% of that country's S1):
+country  India     US
+n                    
+0         5.59   5.58
+1         5.37   5.42
+2        16.98  17.02
+3        24.00  24.09
+4        21.93  21.94
+5        14.64  14.55
+6         7.53   7.43
+7         2.91   2.89
+8         0.85   0.85
+9         0.19   0.19
+10        0.02   0.03
+
+singleton % per country: {'India': 5.59, 'US': 5.58}
+S1 count per country: {'US': 1323633, 'India': 883188}
+
+==============================================================================================================
+## GROUND TRUTH: S2 vs S3 composition   [t=84s]
+==============================================================================================================
+matched-id share by source: {'S3': 51.64, 'S2': 48.36}
+
+S1 entities by which sources they match (% per country):
+country  India     US
+row_0                
+S2 only   6.48   6.48
+S2+S3    80.50  80.47
+S3 only   7.43   7.47
+none      5.59   5.58
+
+#S2 matches per S1 (among S1 with >=1 match):
+country  India     US
+S2                   
+0         7.87   7.91
+1        37.77  37.94
+2        31.36  31.31
+3        16.08  15.99
+4         5.75   5.69
+5         1.17   1.15
+
+#S3 matches per S1 (among S1 with >=1 match):
+country  India     US
+S3                   
+0         6.86   6.87
+1        34.35  34.41
+2        32.10  32.06
+3        17.87  17.88
+4         6.98   6.95
+5         1.70   1.70
+6         0.14   0.14
+
+top (n_S2, n_S3) combos:
+S2  S3
+1   1     269681
+    2     251224
+2   1     223054
+    2     208159
+1   3     140393
+2   3     116076
+3   1     114405
+    2     105817
+0   1      60407
+3   3      59427
+1   0      58750
+0   2      57041
+1   4      54575
+2   0      48490
+    4      45167
+
+==============================================================================================================
+## GROUND TRUTH: is matching one-to-one from the S2/S3 side?   [t=98s]
+==============================================================================================================
+distinct matched ids: 7,638,365 | ids appearing under >1 S1 entity: 0 (0.0000%); max S1s per id: 1
+
+==============================================================================================================
+## PROFILE train_source2   [t=260s]
+==============================================================================================================
+rows=5,034,616  unique ids=5,034,616  prefixes={'S2-': 5034616}
+country counts: {'US': 3016817, 'India': 2017799}  raw values: ["'India'", "'US'"]
+exact duplicate (name,address,country) rows under different ids: 25,873 (0.51%)
+
+missing / empty rate per column (overall):
+  entity_id         empty=0.000%
+  business_name     empty=0.000%
+  business_address  empty=3.356%
+  country           empty=0.000%
+
+rates per country (fraction of rows):
+country                India      US
+name_empty            0.0000  0.0000
+addr_empty            0.0287  0.0368
+name_placeholder      0.0000  0.0000
+addr_placeholder_tok  0.0220  0.0290
+name_indic            0.2351  0.0000
+addr_indic            0.2367  0.0000
+name_accent           0.0437  0.0670
+addr_accent           0.0006  0.0000
+name_upper            0.1494  0.2155
+addr_upper            0.2387  0.8981
+name_junk_prefix      0.0151  0.0242
+name_handle           0.0363  0.0477
+addr_near             0.1151  0.0001
+addr_zip_us           0.0021  0.0000
+addr_pin6             0.0001  0.0009
+addr_5digit           0.0076  0.0974
+addr_house_no         0.6348  0.8712
+addr_any_digit        0.9132  0.9020
+
+length distributions per country (chars / words / comma-parts):
+country               India         US
+name_len   count  2017799.0  3016817.0
+           mean        27.4       23.6
+           std          8.9        8.5
+           min          2.0        2.0
+           5%          13.0       11.0
+           25%         21.0       17.0
+           50%         27.0       23.0
+           75%         33.0       29.0
+           95%         42.0       39.0
+           max        104.0       87.0
+addr_len   count  2017799.0  3016817.0
+           mean        68.2       31.5
+           std         25.0        8.5
+           min          0.0        0.0
+           5%          30.0       21.0
+           25%         53.0       28.0
+           50%         68.0       32.0
+           75%         83.0       36.0
+           95%        110.0       43.0
+           max        249.0       73.0
+name_words count  2017799.0  3016817.0
+           mean         3.7        3.4
+           std          1.1        1.3
+           min          1.0        1.0
+           5%           2.0        1.0
+           25%          3.0        2.0
+           50%          4.0        3.0
+           75%          4.0        4.0
+           95%          5.0        5.0
+           max         15.0       12.0
+addr_parts count  2017799.0  3016817.0
+           mean         4.8        3.0
+           std          1.8        0.6
+           min          0.0        0.0
+           5%           3.0        3.0
+           25%          4.0        3.0
+           50%          5.0        3.0
+           75%          6.0        3.0
+           95%          8.0        4.0
+           max         19.0        4.0
+
+-- 10 random rows, country=India
+   entity_id                            business_name                                                                                             business_address country
+ S2-13577160 UMG Solutions Industries Private Limited                                                            FLAT NO. 34, PKT D SARITA VIHAR, NEW DELHI, Delhi   India
+S2-322282021  Sunrise Unrietd Exports Private Limited                                 NO 1/3, GRAMPANCHAYATH NAGAIDALI KOLLOR POST, CHINCHOLI, KALABURAGI, ಕರ್ನಾಟಕ   India
+S2-586100076        Dr Runway (India) Enclave Private                         BLOCK E-B3/11 104, AMRAPALI PLAZA, AMRAPALI CIRCLE VAISHALI NAGAR, JAIPUR, Rajasthan   India
+S2-558072010         Prvae Sanjeevani 6arment Limited                                                                            0521, MUZAFFARNAGAR, उत्तर प्रदेश   India
+S2-716419873     Shri -- Trio Hand1ooms Private (Ltd)                                                                            2002, BOMBAY, MUMBAI, Maharashtra   India
+S2-971284830             HARSHVARDHAN POLYTECHNIC LTD                      403 COMMERCE SIX, NR SOPAN TOWER NR COMMERCE SIX ROAD SAMVED ROAD, CITY TALUKA, Gujarat   India
+S2-642905494                           WFJ [Services]    UJALA HOUSE, 196 5TH FLOOR, KONDIVITA LANE MAROL, RAMKRISHNA MANDIR MARG, ANDHERI(E), MUMBAI, Maharashtra   India
+S2-432884597            Golden Healthcare Private Ltd                       KADAMPATTU HOUSE, TC 15/2879, TKD ROAD, THIRUVANANTHAPURAM, THIRUVANANTHAPURAM, Kerala   India
+S2-422091619          गोल्डन फाइनेंस प्राइवेट लिमिटेड                                             805, TEJLI ROAD, RAGHUNATH PURI, JAGADHRI, YAMUNA NAGAR, Haryana   India
+S2-842098573                    Rajshree-Advis0rs LLP TOWER C, TH FLOOR, IBC KNOWLEDGE PARK, BANNERGHATTA MAIN ROAD, BHAVANI NAGAR, SG PALYA, BANGALORE, Karnataka   India
+
+   top name last-tokens (India): {'limited': 422056, 'ltd': 230827, 'ड': 190475, 'private': 118875, 'center': 49908, 'llp': 48890, 'ltd.': 38474, 'services': 38329, 'ल': 35533, 'డ': 33052, 'ಡ': 31376, 'ட': 28614, 'pvt': 26889, 'ড': 25923, 'co': 25290, 'ડ': 21841, 'company': 17740, 'corporation': 17466, 'corp': 17115, 'service': 16587}
+   top address last-components (India): {'Maharashtra': 280302, 'Delhi': 172523, 'Uttar Pradesh': 107449, 'Karnataka': 103050, 'महाराष्ट्र': 94232, 'Tamil Nadu': 92822, 'Gujarat': 84130, 'West Bengal': 83869, 'Telangana': 66205, 'दिल्ली': 58974, '': 57847, 'Haryana': 52309, 'Rajasthan': 47222, 'Andhra Pradesh': 47018, 'Kerala': 41615, 'उत्तर प्रदेश': 36157, 'ಕರ್ನಾಟಕ': 34055, 'Bihar': 33760, 'Madhya Pradesh': 32964, 'தமிழ்நாடு': 30610}
+   first address component is a region (== some last-component in top-60): 0.1205
+
+-- 10 random rows, country=US
+   entity_id                             business_name                         business_address country
+S2-428826130          Classic Talent Imcdiustries Corp           CHARLOTE, 814-818 KINGS DR, NC      US
+S2-705505183                     Christ Cathedral Corp               7824 13, CORTLANDVILLE, NY      US
+S2-281939568                              Compass-PLLC      8818 HOLMES HILL RD, ARUORA CDP, IN      US
+S2-304281105                      Chicky Ramirez Signs              6819 106RD ST, JOHNSTON, IA      US
+S2-628536650                          Nevada Northside         17 NATCHEZ COURT, GREENSBORO, NC      US
+S2-977755010                 Express Retail Vntres LLC  13609 ORCHARD DRIVE, FAIRFAX COUNTY, VA      US
+S2-352488877 Pediatric Gróup of Middlesex Westgate Inc        MIDDLESEX, 9885 WALNUT STREET, NC      US
+S2-200651568                   MUM Berkley Inc Service                                               US
+S2-766504912                      Heritage Nuveen Ínc. 9-11 PRINCETON STREET, NORTH ANDOVER, MA      US
+S2-102186205                                total auto    ##17 EDGEVIEW LANE, STATEN ISLAND, NY      US
+
+   top name last-tokens (US): {'llc': 410494, 'inc': 235439, 'center': 95802, 'corp': 94957, 'inc.': 83703, 'co': 79846, 'partners': 75536, 'ltd': 75423, 'group': 69578, 'services': 59689, 'l.l.c.': 54956, 'holdings': 52316, 'lp': 42577, 'corporation': 36904, 'service': 28921, 'incorporated': 23165, 'pc': 22769, 'associates': 19616, 'p.c.': 17585, 'pllc': 17321}
+   top address last-components (US): {'TX': 253091, 'NY': 194856, 'NC': 179658, 'OH': 162105, 'IL': 143415, 'VA': 113661, 'TN': 113357, '': 111121, 'AZ': 107782, 'MA': 107752, 'IN': 93562, 'WA': 80031, 'MD': 76855, 'CA': 71083, 'AL': 61806, 'WI': 59697, 'MN': 59007, 'OR': 56855, 'KY': 56010, 'AR': 51320}
+   first address component is a region (== some last-component in top-60): 0.1053
+
+[source2] matched ids missing from file: 0 | cross-country pairs: 0 of 3,693,619
+[source2] running NN hardness scan ...
+
+==============================================================================================================
+## PROFILE train_source3   [t=702s]
+==============================================================================================================
+rows=5,285,603  unique ids=5,285,603  prefixes={'S3-': 5285603}
+country counts: {'US': 3170056, 'India': 2115547}  raw values: ["'US'", "'India'"]
+exact duplicate (name,address,country) rows under different ids: 18,860 (0.36%)
+
+missing / empty rate per column (overall):
+  entity_id         empty=0.000%
+  business_name     empty=0.000%
+  business_address  empty=3.328%
+  country           empty=0.000%
+
+rates per country (fraction of rows):
+country                India      US
+name_empty            0.0000  0.0000
+addr_empty            0.0307  0.0350
+name_placeholder      0.0000  0.0000
+addr_placeholder_tok  0.0206  0.0276
+name_indic            0.1317  0.0000
+addr_indic            0.2249  0.0000
+name_accent           0.0532  0.0680
+addr_accent           0.0005  0.0000
+name_upper            0.0258  0.0320
+addr_upper            0.0004  0.0000
+name_junk_prefix      0.0162  0.0233
+name_handle           0.0389  0.0457
+addr_near             0.0873  0.0001
+addr_zip_us           0.0014  0.0001
+addr_pin6             0.0001  0.0009
+addr_5digit           0.0070  0.0980
+addr_house_no         0.6149  0.8793
+addr_any_digit        0.9006  0.9130
+
+length distributions per country (chars / words / comma-parts):
+country               India         US
+name_len   count  2115547.0  3170056.0
+           mean        27.0       24.0
+           std          9.7        9.2
+           min          2.0        2.0
+           5%          12.0       11.0
+           25%         20.0       17.0
+           50%         27.0       23.0
+           75%         33.0       30.0
+           95%         43.0       40.0
+           max        123.0       88.0
+addr_len   count  2115547.0  3170056.0
+           mean        59.1       38.4
+           std         27.4       10.5
+           min          0.0        0.0
+           5%          19.0       25.0
+           25%         39.0       34.0
+           50%         58.0       39.0
+           75%         77.0       44.0
+           95%        106.0       53.0
+           max        240.0      104.0
+name_words count  2115547.0  3170056.0
+           mean         3.7        3.4
+           std          1.3        1.4
+           min          1.0        1.0
+           5%           1.0        1.0
+           25%          3.0        2.0
+           50%          4.0        3.0
+           75%          4.0        4.0
+           95%          6.0        6.0
+           max         18.0       14.0
+addr_parts count  2115547.0  3170056.0
+           mean         4.7        3.1
+           std          1.8        0.7
+           min          0.0        0.0
+           5%           3.0        3.0
+           25%          4.0        3.0
+           50%          4.0        3.0
+           75%          6.0        3.0
+           95%          8.0        4.0
+           max         20.0        4.0
+
+-- 10 random rows, country=India
+   entity_id                                 business_name                                                                           business_address country
+S3-369455652 Bapulapadu Infratech Plastics Private Limited                     D.no:##1 52 Nr Panchayati Off Remalle Krishna, Bapulapadu, Krishna, AP   India
+S3-813181051                रियल सर्विसेज प्राइवेट लिमिटेड                                                                      #A-54 2, Gurugram, HR   India
+S3-712340314                                Sri Sarika Ltd                                        Gulmohar Cross Road No. ##9, Mumbai City, Virar, MH   India
+S3-771770364             सेवन कंसल्टेंट्स प्राइवेट लिमिटेड                                               B-584 Sainik Colony Sector 49, Faridabad, HR   India
+S3-782742218             Vijay Investments Private Limited                         33-A Ground Floor Rani Garden Shastri Nagar, Delhi, East Delhi, DL   India
+S3-300826412                      creativeconstruction.com                            H.no 27-28 Double Storey, 3Rd Floor, New Rajender Nagar, दिल्ली   India
+S3-209999694 Black-Apex Agro Constructions Private Limited     Unit No. 6A., 2Nd Floor, Phase Ii, Gnp Galaxy, Kalyan Badlapur Road, Thane, महाराष्ट्र   India
+ S3-72642279          M/s Antariksh & Brothers Private Ltd                                                           247, Kolkata, Parganas North, WB   India
+S3-756772400             Mr Satyam Limited Service Service                                         90, New Rajdhani Enclave, Delhi, New Delhi, दिल्ली   India
+S3-659940698                           Krti Pvt Ltd Center Gautam Buddha Nagar, O-c-939 Gaur City Center, उत्तर प्रदेश, Sector 4 Greater Noida (West)   India
+
+   top name last-tokens (India): {'limited': 538877, 'ltd': 256560, 'private': 124116, 'ड': 106749, 'center': 66152, 'llp': 58335, 'services': 50332, 'ltd.': 41033, 'pvt': 28207, 'co': 26579, 'service': 21986, 'partners': 20894, 'ल': 20038, 'డ': 18499, 'ಡ': 17676, 'límited': 17318, 'company': 17261, 'corporation': 17124, 'corp': 17026, 'ட': 16015}
+   top address last-components (India): {'MH': 268344, 'DL': 170480, 'UP': 103243, 'KA': 98030, 'महाराष्ट्र': 89606, 'TN': 88283, 'WB': 80634, 'GJ': 80490, '': 64949, 'TG': 62614, 'दिल्ली': 56638, 'HR': 50384, 'RJ': 44914, 'KL': 39614, 'उत्तर प्रदेश': 34513, 'ಕರ್ನಾಟಕ': 32880, 'MP': 31774, 'BR': 31683, 'தமிழ்நாடு': 29662, 'ગુજરાત': 26715}
+   first address component is a region (== some last-component in top-60): 0.1068
+
+-- 10 random rows, country=US
+   entity_id                            business_name                               business_address country
+S3-255822664            Modern Conusemhr Dynamics LLC      4807-4809 Cowslip Ct, Oxon Hill, Maryland      US
+S3-932326606                        Ltd Josey Afmaena California, Sacramento, 1811 Tribute Road, # J      US
+S3-137608904          Vazquez,-Swanson & Burns Clinic            3316 Concord Ct, Lockport, Illinois      US
+S3-167956719                       Gulf Resources LLC  5304 Hornes Church Rd, Bailey, North Carolina      US
+S3-512626833                         Dones Consulting       Dickinson, 5421 Forest Cove Drive, Texas      US
+S3-258127816      Cardiology Bay Specialists Highland            44020 Padilla Rd, Maricopa, Arizona      US
+S3-414934572       Moreno Industrial Ltd - 1524075706        02657 Nottingham Lane, Fenton, Missouri      US
+S3-233036798      Henry,, Robby M.D., M.D., P.C. P.C.      34 Addison St, City Of De Pere, Wisconsin      US
+S3-213580251 trejo and johnson summit llc (ID: 53810)     211 Quincy Court, New Bern, North Carolina      US
+S3-899202821     Diena Shepherd Gulf Cleaning Service        3059 Lorena Avenue, Baltimore, Maryland      US
+
+   top name last-tokens (US): {'llc': 449525, 'inc': 254931, 'center': 104641, 'corp': 93865, 'inc.': 81241, 'partners': 80850, 'co': 77340, 'group': 72863, 'ltd': 70639, 'services': 63898, 'holdings': 53627, 'l.l.c.': 51620, 'lp': 40183, 'corporation': 32503, 'service': 31428, 'pc': 26865, 'associates': 21454, 'p.c.': 20664, 'pllc': 20392, 'incorporated': 19241}
+   top address last-components (US): {'Texas': 253243, 'New York': 194160, 'North Carolina': 179426, 'Ohio': 161661, 'Illinois': 143592, 'Virginia': 113194, 'Tennessee': 113021, '': 110968, 'Massachusetts': 107566, 'Arizona': 107208, 'Indiana': 93802, 'Washington': 80994, 'Maryland': 77194, 'California': 71005, 'Alabama': 61879, 'Wisconsin': 59959, 'Minnesota': 59127, 'Oregon': 56389, 'Kentucky': 55893, 'Arkansas': 51509}
+   first address component is a region (== some last-component in top-60): 0.0957
+
+[source3] matched ids missing from file: 0 | cross-country pairs: 0 of 3,944,746
+[source3] running NN hardness scan ...
+
+==============================================================================================================
+## GROUND TRUTH: S2/S3 records that match nothing   [t=6627s]
+==============================================================================================================
+src      country
+source2  India      26.63
+         US         26.64
+source3  India      25.35
+         US         25.38
+overall: {'source2': 26.64, 'source3': 25.37}
+
+all matched ids exist in S2/S3: True; S2 ids with S3 prefix etc.: 0, 0
+id overlap S1/S2/S3 numeric parts (just curiosity): 26801
+
+==============================================================================================================
+## MATCHED PAIRS: noise statistics on 50,000 random matched S1 entities   [t=6652s]
+==============================================================================================================
+pairs sampled: 183,242
+country         India              US        
+src                S2      S3      S2      S3
+name_exact     0.1033  0.1131  0.1931  0.1885
+addr_exact     0.0984  0.0417  0.1144  0.0461
+m_name_indic   0.2336  0.1335  0.0000  0.0000
+m_addr_indic   0.2326  0.2212  0.0000  0.0000
+m_name_upper   0.1650  0.0285  0.2334  0.0323
+m_addr_upper   0.2342  0.0004  0.8855  0.0000
+m_junk_prefix  0.0169  0.0184  0.0292  0.0254
+m_handle       0.0483  0.0493  0.0607  0.0586
+m_addr_empty   0.0369  0.0398  0.0499  0.0464
+s1_near        0.1356  0.1360  0.0000  0.0000
+m_near         0.1148  0.0880  0.0000  0.0000
+
+name token_sort_ratio / token_set_ratio / address token_sort_ratio quantiles:
+        name_tsr                     name_tset                      addr_tsr                  
+country    India           US            India            US           India          US      
+src           S2    S3     S2     S3        S2     S3     S2     S3       S2    S3    S2    S3
+0.05         9.0  10.0   53.0   51.0      10.0   11.0   59.0   60.0     43.0  29.0  39.0  49.0
+0.10        10.0  12.0   65.0   62.0      11.0   13.0   77.0   78.0     61.0  40.0  68.0  65.0
+0.25        43.0  64.0   81.0   77.0      46.0   81.0   92.0   93.0     81.0  59.0  82.0  77.0
+0.50        85.0  86.0   92.0   91.0      93.0   95.0  100.0  100.0     91.0  84.0  92.0  84.0
+0.75        95.0  96.0  100.0  100.0     100.0  100.0  100.0  100.0     96.0  92.0  97.0  90.0
+
+postcode agreement on matched pairs (% per country/src):
+country           India            US       
+src                  S2     S3     S2     S3
+row_0                                       
+agree              0.01   0.01   0.01   0.01
+missing both      99.99  99.99  99.99  99.99
+missing one side   0.00   0.00   0.00   0.00
+
+house_no agreement on matched pairs (% per country/src):
+country           India            US       
+src                  S2     S3     S2     S3
+row_0                                       
+agree             47.74  46.20  75.52  76.82
+conflict           9.01   8.48   7.96   7.99
+missing both      30.58  30.92   0.57   0.54
+missing one side  12.67  14.40  15.96  14.65
+
+examples of house_no conflicts:
+                                                                                 addr                                                                                    m_addr
+                                           658 Creek Bend Drive, Lake Saint Louis, MO                                                    58 CREEK BEND DR, LAKE SAINT LOUIS, MO
+             48, Ballygunge Place Ground Floor, Kolkata, Kolkata, Howrah, West Bengal                 H.NO 717 48, BALLYGUNGE PLACE GROUND FLOOR, KOLKATA, KOLKATA, West Bengal
+                                                     Ogdensburg, NY, 1021 Main Street                                                           021 MAIN STREET, OGDENSBURG, NY
+Rz-6, F/Floor, Kh. No-9/1, Syndicate Enclave Main, New Delhi, South West Delhi, Delhi   RZ-##6, NEW DELHI, SOUTH WEST DELHI, Delhi, F/FLOOR, KH. NO-9/1, SYNDICATE ENCLAVE MAIN
+   R-565, Pocket P4 Jal Vayu Vihar, Greater Noida, Gautam Buddha Nagar, Uttar Pradesh Greater Noida, Gautam Buddha Nagar, उत्तर प्रदेश, No. 413 R-565, Pocket P4 Jal Vayu Vihar
+              No.261, B2Ndcross7Thblock, Koramangala, Bengaluru, Bangalore, Karnataka                    No 2-61, ಕರ್ನಾಟಕ, Bangalore, B2ndcross7thblock, Koramangala, Bangalore
+                                                    171 Stirling Drive, Vacaville, CA                                                           17 STIRLING DRIVE, VCAVILLE, CA
+                                                11047 Merino Avenue, Apple Valley, CA                                                  11077-11079 MERINO AVE, APPLE VALLEY, CA
+                                               NC, 1205 Upper Reach Drive, Wilmington                                            120 Upper Reach Dr, Wilmington, North Carolina
+                                                    1601 Ute Point, West Tawakoni, TX                                                              601 Ute Point, Qinlan, Texas
+
+==============================================================================================================
+## 25 MATCHED PAIRS SIDE BY SIDE (mixed US/India, S2/S3)   [t=6669s]
+==============================================================================================================
+[US   ] S1  'Coralie Rodriguez, O.D.'                                    | 'CA, Fontana, 9342 Live Oak Avenue'
+        S3  'Coralie Rodriguez, Service'                                 | '9342 Live Oak Avenue, Fontana, California'   (name_tsr=74, addr_tsr=89)
+
+[India] S1  'Chains Appliances (India) Limited'                          | '53 Shree Ramnagar, Ahmedabad Highway Road Vileparle (East), Mumbai, Mumbai City, Maharashtra'
+        S3  'Chains Appliances (India) Ltd'                              | '053 Shree Ramnagar, Bombay, Mumbai City, MH'   (name_tsr=93, addr_tsr=57)
+
+[US   ] S1  'Temple Church'                                              | '8792 St Rte 335, Minford, OH'
+        S3  'Irinylasolx doing business as Temple Church'                | '8792 St Rte 335, Minford, OH'   (name_tsr=46, addr_tsr=100)
+
+[India] S1  'Mansha Business Pvt. Ltd.'                                  | 'B 101, Radha Krishna Residency, Opp.Raymond Show Room, Manpada Road, Dom, Bivali(E), Mumbai, Mumbai City, Maharashtra'
+        S3  '-- Mansha Business Pvt.'                                    | 'Mumbai, B 101, Mumbai City, महाराष्ट्र'   (name_tsr=90, addr_tsr=41)
+
+[US   ] S1  'Golden Cleaning Service'                                    | '18403 Willis Avenue, Douglas County, NE'
+        S2  'Golden Cleaning'                                            | ''   (name_tsr=79, addr_tsr=0)
+
+[India] S1  'Zr International School Ltd'                                | 'No.68, 2Nd Floor, 5Th Main, 7Th Cross, Papanna Block, Ganganagar, Bangalore North, Bangalore, Karnataka'
+        S3  'Zr International Ltd Service'                               | 'No.##68, 2Nd Floor, 5Th Main, 7Th Cross, Papanna Block, Ganganagar, Bangalore North, Bangalore, KA'   (name_tsr=84, addr_tsr=96)
+
+[US   ] S1  "Corine's Boutique LLC"                                      | 'Quincy, MA, 51 Commonwealth Avenue'
+        S2  "Corine's Boutique  LLC"                                     | 'MA, 51  COMMONWEALTH AVE, QUINCY'   (name_tsr=100, addr_tsr=95)
+
+[US   ] S1  'Williams European LLC'                                      | '1023 Tiffin Street, Unit 5, Bucyrus, OH'
+        S2  'Williams Éuropean LLC'                                      | '1023 Tiffin St, BUCYRUS, OH'   (name_tsr=57, addr_tsr=82)
+
+[India] S1  'Aditya Finance Pvt Ltd'                                     | '12/1, Lindsay Street New Market, Kolkata, Howrah, West Bengal'
+        S2  'আদিত্য ফাইন্যান্স প্রাইভেট লিমিটেড'                         | '2/1, LINDSAY STREET NEW MARKET, KOLKATA, HOWRAH, West Bengal'   (name_tsr=11, addr_tsr=99)
+
+[India] S1  'Lotus & Sons Private Limited'                               | '7/3, Bd Estate, Lancer Road, Delhi, North Delhi, Delhi'
+        S3  'Lotus & Sons Private'                                       | '7/3, North Delhi, DL'   (name_tsr=82, addr_tsr=54)
+
+[US   ] S1  'Baker and Isaac Lincoln'                                    | '1445 Collins Avenue, Topeka, KS'
+        S3  'Baker And-Isaac'                                            | 'Collins Avenue, Topeka, Kansas'   (name_tsr=79, addr_tsr=84)
+
+[US   ] S1  'PK City Inc'                                                | 'Arlington, TN, 91 Lookout Point Cove'
+        S3  'The PK City Inc'                                            | '91 Lookout Point Cv, Arlington, Tennessee'   (name_tsr=85, addr_tsr=88)
+
+[US   ] S1  'Thacker, Passmore & Sanchez LLC'                            | '1903 Young Street, Cincinnati, OH'
+        S3  'Thacker, Passmore & Sánchez LLC'                            | '1903 Young Street, Cincinnati, Ohio'   (name_tsr=96, addr_tsr=97)
+
+[US   ] S1  'Zia Certified Spartacus LP'                                 | '902 Main Street, Hanson, MA, Unit 38'
+        S2  'Zia Certified Spartacus'                                    | 'MA, HANSON, MAIN STREET'   (name_tsr=94, addr_tsr=78)
+
+[US   ] S1  'Brightent Madison Inc'                                      | '4 Mac Arthur Court, Buffalo Grove, IL'
+        S2  'Brightent Madison Incorporated'                             | '4 MAC ARTHUR CT, BUFFALO GROVE, IL'   (name_tsr=82, addr_tsr=96)
+
+[India] S1  'Rkk Alley Corp'                                             | 'Maharashtra, Plot No-A, 2Nd Floor, Shop No.6, Ganesham Commercial Bldg, Pimple Saudagar, Pune, S.No.21/18 To 24'
+        S3  'Rkk Corp Center'                                            | 'Block D-00748 S.no.21/18 To 24, Plot No-a, 2Nd Floor, Shop No.6, Ganesham Commercial Bldg, Pimple Saudagar, Pune, MH'   (name_tsr=69, addr_tsr=89)
+
+[US   ] S1  'Lavender Prime Bsp LLC'                                     | '1857 35th Street, Unit Apartment 103, Fargo, ND'
+        S3  'Lavender Prime Bsp Llc'                                     | '1857 35th St, Unit Apartment 103, Fargo, North Dakota'   (name_tsr=100, addr_tsr=83)
+
+[US   ] S1  'Robles, Greer & Flores Inc.'                                | '4740 500, Murray, UT'
+        S2  'ROBLES, GREER &'                                            | '4740-B 500, SALT LAKE CITY CCITY, UT'   (name_tsr=69, addr_tsr=50)
+
+[India] S1  'Raindrops Services Private Limited'                         | 'Tp 621, 621A, 622, 1St Floor, Shibila Complex Po. Thalakulathoor, Thalakkulathur Desam, Kozhikode, Kerala'
+        S2  'RAINDROPS SERVICES-PRIVATE'                                 | 'TP 621, 621A, 622, 1ST FLOOR, SHIBILA COMPLEX PO. THALAKULATHOOR, THALAKKULATHUR DESAM, KOZHIKODE, Keralam'   (name_tsr=87, addr_tsr=99)
+
+[US   ] S1  'Hernandez, Cosio and Wilburn, Inc'                          | '3865 J Street, Unit APT 122, Sacramento, CA'
+        S2  'Hernandez, Cosio and Wilburn,'                              | '3865 J STREET, CA, SACRAMENTO'   (name_tsr=93, addr_tsr=81)
+
+[India] S1  'Raj Infotech'                                               | "Unit No.105, Shree Complex, No.73, Shree Circle, St.John'S Road, Bangalore, Karnataka"
+        S2  'RAJ INFOTECH LIMITED'                                       | "ಕರ್ನಾಟಕ, UNIT NO.1-05, SHREE COMPLEX, NO.73, SHREE CIRCLE, ST.JOHN'S ROAD, BANGALORE"   (name_tsr=75, addr_tsr=87)
+
+[US   ] S1  'Historical Alliance'                                        | '5900 Timber Creek Lane, Unit 402, Raleigh, NC'
+        S3  'historical alliance'                                        | '5900 Timber Creek Ln, # 402, Raleigh, North Carolina'   (name_tsr=100, addr_tsr=76)
+
+[India] S1  'Big Investments Pvt Ltd'                                    | '91, Kiran Vihar, Delhi, East Delhi, Delhi'
+        S2  'बिग इन्वेस्टमेंट्स प्रा. लि.'                               | '0091, KIRAN VIHAR, THANE, EAST DELHI, दिल्ली'   (name_tsr=13, addr_tsr=66)
+
+[India] S1  'Vijay Technology'                                           | 'Office No. 1584, 15Th Floor Gaur City Mall, C-01/Bgh-01, Sector-4, Greater Noida West, Noida, Gautam Buddha Nagar, Uttar Pradesh'
+        S3  'विजय टेक्नोलॉजी'                                            | 'Office No. 1584, Ghaziabd, Noida, UP'   (name_tsr=7, addr_tsr=37)
+
+[India] S1  'Kunal Vintrade Private Limited'                             | 'Unit No 111 Blockno 1 Istfloor Tribhuwan Complex Ishwar Nagar, New Delhi, South Delhi, Delhi'
+        S3  'Shri Kuna1 Vintrade Private'                                | ''   (name_tsr=74, addr_tsr=0)
+
+
+==============================================================================================================
+## NEAREST NEIGHBOUR HARDNESS (brute force, same country, token_sort_ratio on name+address)   [t=6669s]
+==============================================================================================================
+best NEGATIVE score per query S1 (quantiles):
+                   count  mean  std   min   25%   50%   75%   max
+kind      country                                                
+matched   India     30.0  81.5  6.6  65.0  77.5  82.0  86.0  94.0
+          US        30.0  80.6  6.1  70.0  76.2  80.5  85.8  93.0
+singleton India     30.0  84.6  6.3  69.0  81.2  85.0  89.8  94.0
+          US        30.0  83.3  6.7  68.0  78.0  84.5  88.0  95.0
+
+best TRUE-match score for matched queries:
+         count  mean  std   min   25%   50%   75%    max
+country                                                 
+India     30.0  91.6  4.8  79.0  90.0  93.0  95.0   98.0
+US        30.0  91.0  8.3  58.0  88.0  93.0  95.0  100.0
+
+matched queries where some negative scores >= best true match: 8.33%
+
+10 S1 SINGLETONS and their most similar S2/S3 record:
+[US] S1 S1-100517908: 'Dredi Garver Prime Era PC' | 'Yuma, AZ, 6800 Strand Avenue, Unit 59'
+      best source2 (65): 'Surgical Center' | '6800 STRAND AVENUE, YUMA, AZ'
+      best source3 (75): 'Dredi Garver Prime  Era Holdings' | '6821 Strand Ave, # 59, Yuma, Arizona'
+[US] S1 S1-103774850: 'Cardenas Arbor P.C.' | 'UT, Sandy City, 8620 1185'
+      best source2 (75): 'P.C. Cardenas Árb0r Uptown' | '8631 1185, SANDY CITY, UT'
+      best source3 (70): 'Cardenas Partners Center' | '8631 1185, Sandy City, Utah'
+[India] S1 S1-104348966: 'Vm Business (India) Pvt Ltd' | 'Patna, Bihar, C/O Samjeeb Kumar Mirjapur Nohta, Fatuha'
+      best source2 (85): 'Vm Business (India) Overseas Pvt Limited' | 'DOOR NO 34 C/O SAMJEEB KUMAR MIRJAPUR NOHTA, FATUHA, Bihar'
+      best source3 (87): 'Vm Business (India) Public Limited' | 'H.no 34- C/o Samjeeb Kumar Mirjapur Nohta, Patna, Fatuha, BR'
+[US] S1 S1-111648363: 'Fiorenze P. Duncan, D.O., M.D., P.C.' | '2111 Vanda Lane, Unit 109, Oxnard, CA'
+      best source2 (85): 'Fiorenze P. D.O., Duncan, M.D.,  P.C. Midtown' | '2118 VANDA LANE, OXNARD, CA'
+      best source3 (68): 'Fiorenze P. Duncan, D.O., M.D.,  P.C.' | '2915 Kane Street, Richmond City, Virginia'
+[US] S1 S1-119270846: 'Anchor Freight Union' | '89-32 88 Street, Woodhaven, NY'
+      best source2 (73): 'Golden-Sunstone' | '87-23 89 Street, WOODHAVEN, NY'
+      best source3 (80): 'Anchor  Freight Union Inc' | '0089-34 88 Street, Woodhaven, New York'
+[India] S1 S1-14883067: 'Swastik Investments Private Limited' | '28, Shanti Shopping Center, R. P. Road, Mulund (West), Mumbai, Maharashtra'
+      best source2 (75): 'Investment & Co Partners Ltd' | '#2-05 , MILAN SHOPPING CENTER MILAN SUBWAY SANTACRUZ WEST, MUMBAI, Maharashtra'
+      best source3 (75): 'Om Systems Garments  Private Limited' | 'C-d/84, Shanti Shopping Center, Mira Road (E), Mumbai, Mumbai City, MH'
+[US] S1 S1-185909780: 'West Royal Tankers' | '635 Baker Street, Unit J106, Costa Mesa, CA'
+      best source2 (76): 'West Royal-Tankers Eastgate Inc' | '646 BAKER ST, COSA MESA, CA'
+      best source3 (88): 'West Royal Tankers LLC' | '646- Baker Street, Unit J106, Costa Mesa, California'
+[India] S1 S1-196414941: 'Renewable Properties Private Limited' | 'Lecocon, 6Th Floor, Rajagiri Business School (Rbs) Pappakudath Road, Rajagiri Valley, Kakkanad, Ernakulam, Kerala'
+      best source2 (91): 'Private Renewable Properties Industries Limited' | 'NO 4 LECOCON, 6TH FLOOR, RAJAGIRI BUSINESS SCHOOL (RBS) PAPPAKUDATH ROAD, RAJAGIRI VALLEY, KAKKANAD, ERNAKULAM, കേരളം'
+      best source3 (61): 'Dee Limited Private Properties' | 'Shalom, Mrra 35C, Lane 6, Moolepadam Road, Vazhakkala, Kakkanad P., O., Ernakulam, Keralam'
+[India] S1 S1-260530238: 'Aditya Investment LLP' | 'C/O Apsrtc, Prakasam, Chirala, Andhra Pradesh, S No.121/1, Perala Bus Stand'
+      best source2 (62): 'Dr Ds Lifestyle' | 'H NO: 21-18-17, BESIDE SAI BABA TEMPLE, PERALA, CHIRALA, Andhra Pradesh'
+      best source3 (83): 'Aditya Investment [Trading]' | 'H.no 63 C/o Apsrtc, S No.121/1, Perala Bus Stand, Chirala, Prakasam, AP'
+[India] S1 S1-265835553: 'Anand Food Private Limited' | 'Sco No.5, Bhagwati Enclave, Vill. Satiye Wala, Distt. Ferozepur, Ferozepur, Firozpur, Punjab'
+      best source2 (89): 'Anand Food Limited' | 'SCO NO.1-16, BHAGWATI ENCLAVE, VILL. SATIYE WALA, DISTT. FEROZEPUR, FEROZEPUR, Punjab'
+      best source3 (65): 'United Estate Private Limited' | 'House No. 12(P), Street No. 4 Ferozepur Cantt, Ferozepur, Firozpur, ਪੰਜਾਬ'
+
+==============================================================================================================
+## PROFILE test_source1   [t=6679s]
+==============================================================================================================
+rows=1,732,544  unique ids=1,732,544  prefixes={'S1-': 1732544}
+country counts: {'India': 809986, 'US': 663106, 'France': 259452}  raw values: ["'US'", "'France'", "'India'"]
+exact duplicate (name,address,country) rows under different ids: 0 (0.00%)
+
+missing / empty rate per column (overall):
+  entity_id         empty=0.000%
+  business_name     empty=0.000%
+  business_address  empty=0.000%
+  country           empty=0.000%
+
+rates per country (fraction of rows):
+country               France   India      US
+name_empty            0.0000  0.0000  0.0000
+addr_empty            0.0000  0.0000  0.0000
+name_placeholder      0.0000  0.0000  0.0000
+addr_placeholder_tok  0.0000  0.0000  0.0000
+name_indic            0.0000  0.0000  0.0000
+addr_indic            0.0000  0.0000  0.0000
+name_accent           0.1572  0.0000  0.0000
+addr_accent           0.2784  0.0006  0.0000
+name_upper            0.0000  0.0000  0.0000
+addr_upper            0.0000  0.0000  0.0000
+name_junk_prefix      0.0379  0.0001  0.0014
+name_handle           0.0000  0.0000  0.0004
+addr_near             0.0000  0.1345  0.0001
+addr_zip_us           0.0016  0.0004  0.0000
+addr_pin6             0.0001  0.0001  0.0012
+addr_5digit           0.0041  0.0018  0.1094
+addr_house_no         0.9938  0.6558  0.9951
+addr_any_digit        0.9958  0.9127  1.0000
+
+length distributions per country (chars / words / comma-parts):
+country             France     India        US
+name_len   count  259452.0  809986.0  663106.0
+           mean       19.4      26.4      22.5
+           std         5.3       7.6       7.4
+           min         5.0       5.0       3.0
+           5%         12.0      13.0      11.0
+           25%        16.0      21.0      17.0
+           50%        19.0      27.0      22.0
+           75%        23.0      32.0      27.0
+           95%        29.0      38.0      35.0
+           max        50.0      92.0      66.0
+addr_len   count  259452.0  809986.0  663106.0
+           mean       50.1      77.7      35.0
+           std         8.3      20.9       6.7
+           min        22.0      11.0      13.0
+           5%         40.0      47.0      26.0
+           25%        44.0      63.0      30.0
+           50%        48.0      76.0      34.0
+           75%        54.0      90.0      39.0
+           95%        65.0     116.0      48.0
+           max       147.0     268.0      92.0
+name_words count  259452.0  809986.0  663106.0
+           mean        3.1       3.7       3.4
+           std         0.6       0.8       1.0
+           min         2.0       2.0       1.0
+           5%          2.0       2.0       2.0
+           25%         3.0       3.0       3.0
+           50%         3.0       4.0       3.0
+           75%         3.0       4.0       4.0
+           95%         4.0       5.0       5.0
+           max         6.0      14.0      11.0
+addr_parts count  259452.0  809986.0  663106.0
+           mean        3.0       5.7       3.2
+           std         0.2       1.6       0.4
+           min         2.0       2.0       2.0
+           5%          3.0       3.0       3.0
+           25%         3.0       4.0       3.0
+           50%         3.0       6.0       3.0
+           75%         3.0       7.0       3.0
+           95%         3.0       9.0       4.0
+           max         6.0      21.0       4.0
+
+-- 10 random rows, country=France
+   entity_id                      business_name                                         business_address country
+S1-258113226                Shidokan Ecole SARL                  17 Rue de Valmy, Lille, Hauts-de-France  France
+S1-643804435                   Pique Ecole EURL              20 BD Jules Verne, Nantes, Pays de la Loire  France
+S1-230207052                Chambre Medico SARL        5 Avenue Gaston Bonnier, Nantes, Pays de la Loire  France
+S1-759071723              Supérieure Sante EURL                     9 Rue Rubens, Lille, Hauts-de-France  France
+S1-267637237 Vidourle Boulistes Élémentaire SAS       Pessac, 59 Avenue des Echoppes, Nouvelle-Aquitaine  France
+S1-811528684                 EHPAD Saint Sophro 12 RUE de lOrne, 44800, Saint-Herblain, Pays de la Loire  France
+ S1-33093211                Pipelettes Clinique                    2 Rue Leveux, Calais, Hauts-de-France  France
+S1-277605064                    Mille Club EURL  28 Bis Boulevard Joliot Curie, Nantes, Pays de la Loire  France
+S1-465809292             Pessac Maternelle SARL    90 Rue Simone de Beauvoir, Pessac, Nouvelle-Aquitaine  France
+S1-359269622                 Communale Club SAS                       Hauts-de-France, 6 BD Papin, Lille  France
+
+   top name last-tokens (France): {'sarl': 73480, 'sas': 52276, 'eurl': 16979, 'sa': 12753, 'sasu': 10721, 'sci': 8360, 'ei': 4182, 'club': 2619, 'jean': 1713, 'france': 1577, 'ecole': 1481, 'amicale': 1446, 'comite': 1399, 'sainte': 1304, 'sportive': 1155, 'amis': 961, 'pierre': 957, 'cie': 877, 'notre': 848, 'centre': 814}
+   top address last-components (France): {'Hauts-de-France': 87960, 'Nouvelle-Aquitaine': 73819, 'Pays de la Loire': 62901, 'Bordeaux': 2870, 'Nantes': 2441, 'Lille': 2211, 'Tourcoing': 1221, 'Dunkerque': 1110, 'Calais': 1057, 'Roubaix': 1050, 'Saint-Nazaire': 868, 'Pessac': 812, 'La Teste-de-Buch': 778, 'Mérignac': 691, 'Lège-Cap-Ferret': 550, 'Pornic': 542, 'La Baule-Escoublac': 457, 'Saint-Herblain': 435, '27 RUE Jean Bart': 19, 'Maison des Associations': 16}
+   first address component is a region (== some last-component in top-60): 0.1373
+
+-- 10 random rows, country=India
+   entity_id                                business_name                                                                                       business_address country
+S1-143673304          Js Formings (India) Private Limited                  Andhra Pradesh, Guntur, 2Nd Floor, Cp Complex, Brundavan Gardens, Guntur, 3-30-28/B/1   India
+S1-908429341                   Gold Power Private Limited                                                H.No.4878, Vinchur, Taluka -Niphad, Nashik, Maharashtra   India
+ S1-55482291                     Venus Industries Pvt Ltd                                                       22 B, Bakhtawar Ramnagar, Indore, Madhya Pradesh   India
+S1-536729361                          Jai Finance Limited                                            Shop No. 1 Near Supreme School, Safidon Road, Jind, Haryana   India
+S1-184020731 Sagittarius Holdings (India) Private Limited                                3 Cotton Mktabove Meeena Bazar Jama Masjid, Delhi, Central Delhi, Delhi   India
+S1-938630299            Golden Investment Private Limited                             C-1/38, 3Rd Floor, Old Village Jasola Extn., New Delhi, South Delhi, Delhi   India
+S1-141054942                YRS Logistics Private Limited                                        Plot No-19/4710 Old Station Bazar, Bhubaneswar, Khordha, Orissa   India
+S1-380445466               Agra Transport Private Limited                               Shop No 4, 5, Plot No Cp 4, Mahajan Complex, Sec-4B, Agra, Uttar Pradesh   India
+S1-474828559                North Finance Private Limited A, Floor-3, Todi Industrial Estate, Senapati Bapat Marg, Mathuradas Mill Compound, Mumbai, Maharashtra   India
+S1-378264443                  Arihant Consultancy Limited               C/O Ram Bali Rai, Village- Pandaul Tola- Pandaul, Panch- Pandaul(West), Madhubani, Bihar   India
+
+   top name last-tokens (India): {'limited': 478384, 'ltd': 109315, 'llp': 35503, 'ltd.': 24007, 'co': 15572, 'trust': 6720, 'corporation': 6584, 'corp': 6331, 'company': 6192, 'group': 5259, 'clinic': 4572, 'society': 4343, 'associates': 4110, 'partners': 4069, 'care': 3353, 'school': 3224, 'foundation': 2932, 'center': 2872, 'india': 2385, 'technology': 2280}
+   top address last-components (India): {'Maharashtra': 147860, 'Delhi': 94895, 'Uttar Pradesh': 56762, 'Karnataka': 54552, 'Tamil Nadu': 49080, 'Gujarat': 44332, 'West Bengal': 44189, 'Telangana': 43275, 'Haryana': 27758, 'Kerala': 27145, 'Rajasthan': 24479, 'Bihar': 18018, 'Madhya Pradesh': 17309, 'Andhra Pradesh': 13249, 'Orissa': 10889, 'Punjab': 9878, 'Mumbai': 4153, 'New Delhi': 3288, 'Bangalore': 3131, 'Pune': 2538}
+   first address component is a region (== some last-component in top-60): 0.0931
+
+-- 10 random rows, country=US
+   entity_id                     business_name                                    business_address country
+ S1-69912487     Joseph, Matthew and Tabor LLC      808 Commonwealth Avenue, Strawberry Plains, TN      US
+S1-917032391                   Deni Cho Acadia        Nashville, TN, 5135 Nolensville Pike, Unit 6      US
+S1-581329350                      Blue Program                        261 Jo Mar Road, Ardmore, AL      US
+S1-194622841 Internal Medicine Physicians, Inc               34480 Broad Water Road, Millsboro, DE      US
+S1-692060952                   Verina's Bakery   Lower Providence Township, 16 Highland Avenue, PA      US
+ S1-49427945                 Smith Bulkers LLC                      2818 Stadler Court, Laredo, TX      US
+S1-491264371                   Urban Tattoo PC 601 Seneca Manor Drive, Unit Unit 1K, Rochester, NY      US
+S1-184248554                Frieden Vehicle PC                    289 Rodgers Street, Marianna, AR      US
+S1-280912728          Barbabra Meyer, L.C.S.W.            3671 Hamilton Church Road, Nashville, TN      US
+S1-589847550                Torres Viking, LLC                  KS, 3837 Brush Creek Street, Maize      US
+
+   top name last-tokens (US): {'llc': 178355, 'inc': 95118, 'inc.': 24078, 'group': 13453, 'corp': 13450, 'pc': 12930, 'p.c.': 10916, 'l.l.c.': 10696, 'pllc': 10220, 'center': 9599, 'associates': 8828, 'lp': 8345, 'partners': 7558, 'clinic': 6751, 'care': 6674, 'co': 4151, 'corporation': 3404, 'holdings': 2950, 'company': 2732, 'church': 2688}
+   top address last-components (US): {'TX': 57303, 'NY': 43933, 'NC': 41286, 'OH': 36739, 'IL': 32562, 'TN': 26040, 'VA': 25815, 'AZ': 24756, 'MA': 24260, 'IN': 21458, 'WA': 18512, 'MD': 17330, 'CA': 16483, 'AL': 14175, 'WI': 13652, 'MN': 13609, 'OR': 13023, 'KY': 12743, 'AR': 11802, 'MO': 11045}
+   first address component is a region (== some last-component in top-60): 0.0696
+
+==============================================================================================================
+## NEW (not in train) COUNTRY DETAIL: France in test_source1  rows=259,452   [t=6729s]
+==============================================================================================================
+   entity_id                      business_name                                               business_address country
+S1-258113226                Shidokan Ecole SARL                        17 Rue de Valmy, Lille, Hauts-de-France  France
+S1-643804435                   Pique Ecole EURL                    20 BD Jules Verne, Nantes, Pays de la Loire  France
+S1-230207052                Chambre Medico SARL              5 Avenue Gaston Bonnier, Nantes, Pays de la Loire  France
+S1-759071723              Supérieure Sante EURL                           9 Rue Rubens, Lille, Hauts-de-France  France
+S1-267637237 Vidourle Boulistes Élémentaire SAS             Pessac, 59 Avenue des Echoppes, Nouvelle-Aquitaine  France
+S1-811528684                 EHPAD Saint Sophro       12 RUE de lOrne, 44800, Saint-Herblain, Pays de la Loire  France
+ S1-33093211                Pipelettes Clinique                          2 Rue Leveux, Calais, Hauts-de-France  France
+S1-277605064                    Mille Club EURL        28 Bis Boulevard Joliot Curie, Nantes, Pays de la Loire  France
+S1-465809292             Pessac Maternelle SARL          90 Rue Simone de Beauvoir, Pessac, Nouvelle-Aquitaine  France
+S1-359269622                 Communale Club SAS                             Hauts-de-France, 6 BD Papin, Lille  France
+S1-751787430                Mouvement Club EURL                     34 RUE Buhan, Bordeaux, Nouvelle-Aquitaine  France
+S1-287168196      Game Departemental Ecole EURL               9 Rue du Maréchal Foch, Pornic, Pays de la Loire  France
+S1-819994236                    Route Amis SARL              125 Rue Armand Carrel, Dunkerque, Hauts-de-France  France
+S1-629385275                      EK Lycee EURL                3 Rue Henri Terquem, Dunkerque, Hauts-de-France  France
+ S1-71989963               Mérignac Collège SAS                18 Rue des Aulnes, Mérignac, Nouvelle-Aquitaine  France
+S1-572163299                      KQD Amis SARL               Mérignac, 7 Rue de Normandie, Nouvelle-Aquitaine  France
+S1-786584120             Nouveaux Pharmacie SAS                   39 Rue d'Ostende, Tourcoing, Hauts-de-France  France
+S1-488870130                    Bien Soins EURL           33 Rue Maurice Utrillo, Mérignac, Nouvelle-Aquitaine  France
+S1-785044963                  Union de European         Hauts-de-France, Calais, 12 Rue de la Commune de Paris  France
+S1-698796956              No Fetes (France) SAS 59 Rue de la Paix et des Arts, Saint-Nazaire, Pays de la Loire  France
+
+legal-form tokens in NAME: {'SARL': np.float64(0.2832), 'SAS': np.float64(0.2015), '(France)': np.float64(0.0801), 'EURL': np.float64(0.0654), 'SA': np.float64(0.0492), 'SASU': np.float64(0.0413), 'Ets/Établissements': np.float64(0.0412), 'Cie/Compagnie': np.float64(0.0356), 'SCI': np.float64(0.0322), 'Association': np.float64(0.017), 'EI/EIRL': np.float64(0.0164), 'Groupe': np.float64(0.008), 'SNC': np.float64(0.0), 'SCOP': np.float64(0.0), 'SELARL': np.float64(0.0), 'SCM': np.float64(0.0), 'GIE': np.float64(0.0)}
+
+street-type tokens in ADDRESS: {'rue': np.float64(0.6582), 'av/ave': np.float64(0.1325), 'avenue': np.float64(0.1194), 'ZI/ZA/ZAC': np.float64(0.0627), 'ch/chem': np.float64(0.0586), 'bis/ter': np.float64(0.0508), 'allée': np.float64(0.0468), 'boulevard': np.float64(0.0359), 'impasse': np.float64(0.0198), 'route': np.float64(0.0171), 'chemin': np.float64(0.0141), 'place': np.float64(0.0126), 'cours': np.float64(0.0084), 'bd/bld/blvd': np.float64(0.0076), 'quai': np.float64(0.0076), 'pl': np.float64(0.0037), 'square/sq': np.float64(0.0034), 'all': np.float64(0.0025), 'faubourg/fbg': np.float64(0.002), 'rte': np.float64(0.0015), 'lieu-dit': np.float64(0.0014), 'imp': np.float64(0.0008), 'BP': np.float64(0.0007), 'r': np.float64(0.0001), 'cedex': np.float64(0.0001), 'crs': np.float64(0.0)}
+
+accented chars: name=0.157 addr=0.278  | ALL-CAPS 'RUE': 0.072
+standalone 5-digit (postcode-like) rate: 0.0041; examples: ['1 rue Jodelle, 44600 ST NAZAIRE, Saint-Nazaire, Pays de la Loire', 'BP81319, Nantes, Pays de la Loire, 6 RUE Guillet de La Brosse', '62100, Hauts-de-France, 135 RUE Edgar Degas, Calais', '198 rue du Bois, 59800 LILLE, Lille, Hauts-de-France', '4 rue Marc Sangnier, 33000 BORDEAUX, Bordeaux, Nouvelle-Aquitaine', '2 rue Kellermann, 59200 TOURCOING, Tourcoing, Hauts-de-France', 'Mérignac, 132 avenue Aristide Briand, 33700 MERIGNAC, Nouvelle-Aquitaine', 'Tourcoing, Hauts-de-France, 260 RUE Colbert 59200, 59200']
+top address last-components: {'Hauts-de-France': 87960, 'Nouvelle-Aquitaine': 73819, 'Pays de la Loire': 62901, 'Bordeaux': 2870, 'Nantes': 2441, 'Lille': 2211, 'Tourcoing': 1221, 'Dunkerque': 1110, 'Calais': 1057, 'Roubaix': 1050, 'Saint-Nazaire': 868, 'Pessac': 812, 'La Teste-de-Buch': 778, 'Mérignac': 691, 'Lège-Cap-Ferret': 550, 'Pornic': 542, 'La Baule-Escoublac': 457, 'Saint-Herblain': 435, '27 RUE Jean Bart': 19, 'Maison des Associations': 16, '3 RUE de la Digue': 8, '32 RTE de la Joneliere': 8, '30 RUE des Meuniers': 7, '24 PL de la Liberte': 6, '100 RUE de Lille': 5}
+top 2nd-to-last components (city?): {'Bordeaux': 37215, 'Nantes': 32250, 'Lille': 29592, 'Tourcoing': 15715, 'Dunkerque': 14797, 'Roubaix': 14112, 'Calais': 13647, 'Saint-Nazaire': 11910, 'Pessac': 10937, 'La Teste-de-Buch': 9777, 'Mérignac': 8900, 'Lège-Cap-Ferret': 6943, 'Pornic': 6702, 'Hauts-de-France': 6653, 'Saint-Herblain': 6005, 'La Baule-Escoublac': 5987, 'Nouvelle-Aquitaine': 5634, 'Pays de la Loire': 4854, '27 RUE Jean Bart': 14, 'Maison des Associations': 11, '30 RUE des Meuniers': 8, '100 RUE de Lille': 7, 'La Teste de Buch': 6, '24 AV Gustave Delory': 6, '13 RUE du Chai des Farines': 6}
+
+==============================================================================================================
+## PROFILE test_source2   [t=6762s]
+==============================================================================================================
+rows=4,887,273  unique ids=4,887,273  prefixes={'S2-': 4887273}
+country counts: {'India': 2312565, 'US': 1871330, 'France': 703378}  raw values: ["'India'", "'France'", "'US'"]
+exact duplicate (name,address,country) rows under different ids: 22,641 (0.46%)
+
+missing / empty rate per column (overall):
+  entity_id         empty=0.000%
+  business_name     empty=0.000%
+  business_address  empty=2.648%
+  country           empty=0.000%
+
+rates per country (fraction of rows):
+country               France   India      US
+name_empty            0.0000  0.0000  0.0000
+addr_empty            0.0306  0.0228  0.0294
+name_placeholder      0.0001  0.0000  0.0000
+addr_placeholder_tok  0.0000  0.0219  0.0293
+name_indic            0.0000  0.2364  0.0000
+addr_indic            0.0000  0.2381  0.0000
+name_accent           0.2454  0.0398  0.0625
+addr_accent           0.1815  0.0005  0.0000
+name_upper            0.2080  0.1412  0.2042
+addr_upper            0.2898  0.2400  0.9048
+name_junk_prefix      0.0382  0.0135  0.0220
+name_handle           0.0378  0.0293  0.0393
+addr_near             0.0000  0.1157  0.0001
+addr_zip_us           0.0011  0.0021  0.0000
+addr_pin6             0.0001  0.0001  0.0009
+addr_5digit           0.0051  0.0074  0.0993
+addr_house_no         0.8425  0.6540  0.8904
+addr_any_digit        0.9315  0.9303  0.9205
+
+length distributions per country (chars / words / comma-parts):
+country             France      India         US
+name_len   count  703378.0  2312565.0  1871330.0
+           mean       21.1       28.3       24.3
+           std         7.6        9.1        8.6
+           min         2.0        2.0        2.0
+           5%         11.0       14.0       11.0
+           25%        16.0       22.0       18.0
+           50%        20.0       28.0       24.0
+           75%        26.0       34.0       30.0
+           95%        35.0       44.0       39.0
+           max        60.0      102.0       85.0
+addr_len   count  703378.0  2312565.0  1871330.0
+           mean       39.5       68.7       31.8
+           std        13.2       24.5        8.1
+           min         0.0        0.0        0.0
+           5%         22.0       31.0       22.0
+           25%        31.0       54.0       28.0
+           50%        40.0       68.0       32.0
+           75%        48.0       84.0       36.0
+           95%        59.0      110.0       43.0
+           max       136.0      269.0       75.0
+name_words count  703378.0  2312565.0  1871330.0
+           mean        3.1        3.8        3.5
+           std         1.0        1.1        1.3
+           min         1.0        1.0        1.0
+           5%          1.0        2.0        1.0
+           25%         3.0        3.0        3.0
+           50%         3.0        4.0        3.0
+           75%         4.0        5.0        4.0
+           95%         5.0        5.0        6.0
+           max         8.0       15.0       12.0
+addr_parts count  703378.0  2312565.0  1871330.0
+           mean        2.6        4.9        3.0
+           std         0.7        1.7        0.6
+           min         0.0        0.0        0.0
+           5%          2.0        3.0        3.0
+           25%         2.0        4.0        3.0
+           50%         3.0        5.0        3.0
+           75%         3.0        6.0        3.0
+           95%         3.0        8.0        4.0
+           max         6.0       20.0        4.0
+
+-- 10 random rows, country=France
+   entity_id                  business_name                                        business_address country
+S2-124594349                       Ciraecto                   33 BIS RUE PRUNIER, Bordeaux, Gironde  France
+S2-726354849                 Aikido Anciens     51 R DE LA PLANCHE AU GUE, NANTES, Pays de la Loire  France
+S2-733258288          Fédération du Musical                   3 R MIMEREL, ROUBAIX, Hauts-de-France  France
+S2-836221765                      CW Groupe                       28 R. PIERRE MAUROY, FLCAS, LILLE  France
+S2-977094934                RI Amicale SARL                    13 RUE ALPHONSE MERCIER, LILLE, Nord  France
+S2-382859363              JOURS ÇONCEPT SCI                  41 C RUE DU MARECHAL FRENCH, DUNKERQUE  France
+S2-590739497                  SA PG Finance                                   79 RUE BRUNET, Pessac  France
+S2-933271731  La Teste-de-Buch College SARL 89 AV DE BISSERIE, LA TESTE-DE-BUCH, Nouvelle-Aquitaine  France
+ S2-24725737 Prevention (France) Centre SAS         190 BD DE BEAUREPARIE, ROUBAIX, Hauts-de-France  France
+S2-775810722                 SCI VY Loisirs            Pessac, Gironde, 60 AVENUE DU PARC D'ESPAGNE  France
+
+   top name last-tokens (France): {'sarl': 112379, 'sas': 79135, 'eurl': 34060, 'sa': 28331, 'sasu': 25927, 'sci': 22904, 'france': 18378, 'groupe': 12989, 'fils': 12364, 'développement': 11480, 'club': 11454, 'cie': 7193, 'international': 6982, 'distribution': 6946, 'holding': 6889, 'participations': 6837, 'ecole': 6794, 'amicale': 6588, 's.a.s.': 6302, 's.a.s': 6298}
+   top address last-components (France): {'Hauts-de-France': 76368, 'Gironde': 65047, 'Nord': 64801, 'Nouvelle-Aquitaine': 64246, 'Loire-Atlantique': 54689, 'Pays de la Loire': 54500, 'BORDEAUX': 34618, 'NANTES': 30485, 'LILLE': 27832, '': 21539, 'TOURCOING': 14620, 'DUNKERQUE': 13672, 'ROUBAIX': 13115, 'CALAIS': 12628, 'Pas-de-Calais': 11974, 'PESSAC': 10193, 'SAINT-NAZAIRE': 8341, 'LA TESTE-DE-BUCH': 7955, 'PORNIC': 6326, 'MÉRIGNAC': 5581}
+   first address component is a region (== some last-component in top-60): 0.1493
+
+-- 10 random rows, country=India
+   entity_id                            business_name                                                                    business_address country
+S2-166575920   Private Chaitali Brothers Overseas Ltd        HN 996 BH-196, SALTLAKE, NORTH 24 PARGANAS, West Bengal, SECTOR II, SALTLAKE   India
+S2-574587020                          Electronic Co &               SR 58 PART BLDG 3/C WING FL13 JAGDISH NAGAR, AUNDH, PUNE, Maharashtra   India
+S2-698812451       Sanskriti Property Prívate Limited                        MB3/62, DIAMOND DISTRICT, AIRPORT ROAD, KODIHALLY, Karnataka   India
+S2-973154313            Sri HINGLAJ CHEMICALS PRIVATE              OFFICE NO. 19, RAJ CORNER NR. SIDDHIVINAYAK RESI., PAL, SURAT, Gujarat   India
+S2-815300115 क्रिएटिव इन्वेस्टमेंट्स प्राइवेट लिमिटेड MUMBAI, R.NO ##2 HANUMANT KUTIRSHREYAS COLONEY AAREY ROAD GOREGAON (E), Maharashtra   India
+S2-366100600  Ankleshwar Hospitality Holdings Private                         H.NO G-934 SHOP N-126, GOLDEN PAM PLAZA, ANKLESHWAR, ગુજરાત   India
+S2-472830226                  Pune City Cargo Private       D BL FL303- S707 NARALI BG, CHANDRADEEP, MUKUND NAGAR, PUNE CITY, Maharashtra   India
+S2-976920659                        Matha Educational                                       PLOT NO 37 GAODHI NAGAR, HYDERABAD, Telangana   India
+S2-203575683          ब्राइट इंफोटेक प्राइवेट लिमिटेड                                                 SURVE NO-118/1/2, PUNE, Maharashtra   India
+ S2-87434967                    फॉर्च्यून प्रोजेक्ट्स                                       FLAT NO.H-11, NEW DELHI, CENTRAL DELHI, Delhi   India
+
+   top name last-tokens (India): {'limited': 515869, 'ltd': 266547, 'ड': 217837, 'private': 130546, 'llp': 64728, 'center': 51633, 'ltd.': 44182, 'ल': 40673, 'services': 40453, 'డ': 37716, 'ಡ': 36708, 'ட': 32531, 'ড': 29734, 'pvt': 29494, 'co': 26813, 'ડ': 24779, 'corporation': 19920, 'एलएलप': 19822, 'corp': 19817, 'company': 19584}
+   top address last-components (India): {'Maharashtra': 323565, 'Delhi': 197623, 'Uttar Pradesh': 124350, 'Karnataka': 119978, 'Tamil Nadu': 107984, 'महाराष्ट्र': 107619, 'Gujarat': 96951, 'West Bengal': 96774, 'Telangana': 75760, 'दिल्ली': 67814, 'Haryana': 60262, 'Andhra Pradesh': 54139, 'Rajasthan': 53990, '': 52764, 'Kerala': 48074, 'उत्तर प्रदेश': 41403, 'ಕರ್ನಾಟಕ': 39544, 'Bihar': 39482, 'Madhya Pradesh': 37993, 'தமிழ்நாடு': 35856}
+   first address component is a region (== some last-component in top-60): 0.1149
+
+-- 10 random rows, country=US
+   entity_id                                business_name                        business_address country
+S2-981265547                    REV IT UP TLIO!  HOLDINGS 1314 TUNNEL CANYON PLACE, SAHUARITA, AZ      US
+S2-630545379                            Rivas's Fisheries            79 BRAVENDER RD, DUXBURY, MA      US
+  S2-8650478                             KUHN KUHN ISRAEL              5332 BASELINE RD, MESA, AZ      US
+S2-890294639                              Golden Property  ##7120 GREENFIELD DRIVE, PARK CITY, UT      US
+S2-783242603             Animal Welfare Network Authority       ##26 ACADIA HEIGHTS, VA BUREN, ME      US
+S2-475512515                              Bumiva Partners           438  1TH STREET, MAYVILLE, ND      US
+S2-679034760               CREDIT CONSUMER  CORP SERVICES                571 FM 1295, MOULTON, TX      US
+ S2-39395124 Heartland Medical Westgate Inc. - 3243777313               14  HOLMES ST, QUINCY, MA      US
+S2-155292242                              BENITEZ-CRYSTAL    HARRINGTON LOOP, MC GAHEYSVILLLE, VA      US
+S2-342441516                         Cash  & Martinez LLC        1124 WINDMERE LN, COOPERTOWN, TN      US
+
+   top name last-tokens (US): {'llc': 249676, 'inc': 151287, 'corp': 72041, 'co': 62969, 'ltd': 61018, 'group': 58060, 'partners': 57950, 'center': 55705, 'inc.': 49126, 'holdings': 48626, 'services': 35323, 'l.l.c.': 31517, 'lp': 25283, 'corporation': 21230, 'service': 17030, 'pc': 13059, 'incorporated': 12994, 'associates': 10680, 'pllc': 10142, 'p.c.': 9787}
+   top address last-components (US): {'TX': 157588, 'NY': 120653, 'NC': 113275, 'OH': 100328, 'IL': 89302, 'TN': 71529, 'VA': 70958, 'AZ': 68237, 'MA': 67108, 'IN': 58688, '': 55107, 'WA': 50812, 'MD': 47672, 'CA': 44799, 'AL': 39073, 'WI': 37679, 'MN': 37242, 'OR': 35820, 'KY': 34839, 'AR': 32684}
+   first address component is a region (== some last-component in top-60): 0.0979
+
+==============================================================================================================
+## NEW (not in train) COUNTRY DETAIL: France in test_source2  rows=703,378   [t=6952s]
+==============================================================================================================
+   entity_id                      business_name                                        business_address country
+S2-124594349                           Ciraecto                   33 BIS RUE PRUNIER, Bordeaux, Gironde  France
+S2-726354849                     Aikido Anciens     51 R DE LA PLANCHE AU GUE, NANTES, Pays de la Loire  France
+S2-733258288              Fédération du Musical                   3 R MIMEREL, ROUBAIX, Hauts-de-France  France
+S2-836221765                          CW Groupe                       28 R. PIERRE MAUROY, FLCAS, LILLE  France
+S2-977094934                    RI Amicale SARL                    13 RUE ALPHONSE MERCIER, LILLE, Nord  France
+S2-382859363                  JOURS ÇONCEPT SCI                  41 C RUE DU MARECHAL FRENCH, DUNKERQUE  France
+S2-590739497                      SA PG Finance                                   79 RUE BRUNET, Pessac  France
+S2-933271731      La Teste-de-Buch College SARL 89 AV DE BISSERIE, LA TESTE-DE-BUCH, Nouvelle-Aquitaine  France
+ S2-24725737     Prevention (France) Centre SAS         190 BD DE BEAUREPARIE, ROUBAIX, Hauts-de-France  France
+S2-775810722                     SCI VY Loisirs            Pessac, Gironde, 60 AVENUE DU PARC D'ESPAGNE  France
+S2-737332375                  LAZARE PARENTS EI 3B RUE DU PETIT VILLAGE, ST.-HERBLAIN, Pays de la Loire  France
+S2-915624550 Thoracique Fermiers Compagnie Sarl                     43 RUE DE MADRID, BORDEAUX, Gironde  France
+S2-376472458         Linformatique Pàrents SARL                       66 RUE DÉTROIS, BORDEAUX, Gironde  France
+S2-576502143                   Defense Amis SAS                             #18 RUE LEVAVASSEUR, CALAIS  France
+S2-353901934                     BULLES CUMHLER                           19 ESPL1 DES ANTILLES, PESSAC  France
+S2-274419140          aza anciens (france) sarl                     1 BOULEVARD CLOVIS CONSTANT, NANTES  France
+ S2-59724941                 Secours Ecole SASU                       89 R. LEYTEIRE, BORDEAUX, Gironde  France
+S2-452879572    Centre Francaise Participations                     84 RUE TERRASSON, Bordeaux, Gironde  France
+S2-403182399      Association de Gardon  Groupe                       174 RUE DU COLLÈGE, ROUBAIX, Nord  France
+S2-132647969               Tournesol & Cie Sàrl  Nouvelle-Aquitaine, BORDEAUX, N° 180 RUE DE LA BESAUGE  France
+
+legal-form tokens in NAME: {'SARL': np.float64(0.2032), 'SAS': np.float64(0.1558), 'EURL': np.float64(0.0645), '(France)': np.float64(0.0632), 'SA': np.float64(0.053), 'SASU': np.float64(0.048), 'SCI': np.float64(0.042), 'Ets/Établissements': np.float64(0.0386), 'Groupe': np.float64(0.037), 'Cie/Compagnie': np.float64(0.0346), 'Association': np.float64(0.016), 'SNC': np.float64(0.0116), 'EI/EIRL': np.float64(0.0103), 'SCOP': np.float64(0.0), 'SELARL': np.float64(0.0), 'SCM': np.float64(0.0), 'GIE': np.float64(0.0)}
+
+street-type tokens in ADDRESS: {'rue': np.float64(0.3827), 'r': np.float64(0.2538), 'av/ave': np.float64(0.1273), 'avenue': np.float64(0.0653), 'ZI/ZA/ZAC': np.float64(0.0603), 'ch/chem': np.float64(0.0556), 'bis/ter': np.float64(0.0352), 'allée': np.float64(0.028), 'bd/bld/blvd': np.float64(0.021), 'boulevard': np.float64(0.0199), 'all': np.float64(0.0182), 'impasse': np.float64(0.011), 'route': np.float64(0.0093), 'imp': np.float64(0.0085), 'pl': np.float64(0.0084), 'rte': np.float64(0.0082), 'chemin': np.float64(0.0079), 'place': np.float64(0.0068), 'cours': np.float64(0.0045), 'quai': np.float64(0.0042), 'crs': np.float64(0.0032), 'square/sq': np.float64(0.003), 'faubourg/fbg': np.float64(0.0018), 'lieu-dit': np.float64(0.0015), 'BP': np.float64(0.0004), 'cedex': np.float64(0.0001)}
+
+accented chars: name=0.245 addr=0.181  | ALL-CAPS 'RUE': 0.384
+standalone 5-digit (postcode-like) rate: 0.0051; examples: ['27 R DU BALLET, BP60105, NANTES, Pays de la Loire', '00109 BOULEVARD DES BELGES, NANTES', '00151 BD DES POILUS, NANTES, Pays de la Loire', '00120 Q. DE BACALAN, BORDEAUX', '195 R. DE LA MACKELLERIE, 59100, ROUBAIX, Nord', '46 BD VINCENT GACHE, 44000, NANTES, Loire-Atlantique', 'N°2 RUE DES AUGUSTINS, 33000 BORDEAUX, BORDEAUX, Gironde', 'LILLE, 25 BIS RUE COLBERT, 59000 LILLE']
+top address last-components: {'Hauts-de-France': 76368, 'Gironde': 65047, 'Nord': 64801, 'Nouvelle-Aquitaine': 64246, 'Loire-Atlantique': 54689, 'Pays de la Loire': 54500, 'BORDEAUX': 34618, 'NANTES': 30485, 'LILLE': 27832, '': 21539, 'TOURCOING': 14620, 'DUNKERQUE': 13672, 'ROUBAIX': 13115, 'CALAIS': 12628, 'Pas-de-Calais': 11974, 'PESSAC': 10193, 'SAINT-NAZAIRE': 8341, 'LA TESTE-DE-BUCH': 7955, 'PORNIC': 6326, 'MÉRIGNAC': 5581, 'LA BAULE-ESCOUBLAC': 4887, 'SAINT-HERBLAIN': 4388, 'Bordeaux': 4366, 'LÈGE-CAP-FERRET': 4042, 'Nantes': 3856}
+top 2nd-to-last components (city?): {'BORDEAUX': 61176, 'NANTES': 52365, 'LILLE': 48294, 'TOURCOING': 25753, 'DUNKERQUE': 24296, 'ROUBAIX': 23304, 'CALAIS': 22272, 'PESSAC': 17913, 'SAINT-NAZAIRE': 14396, 'LA TESTE-DE-BUCH': 14026, 'PORNIC': 11197, 'MÉRIGNAC': 10110, 'LA BAULE-ESCOUBLAC': 8546, 'Bordeaux': 7763, 'SAINT-HERBLAIN': 7322, 'LÈGE-CAP-FERRET': 6970, 'Nantes': 6593, 'Lille': 6135, 'Hauts-de-France': 5711, 'Nouvelle-Aquitaine': 4984, 'Nord': 4961, 'Gironde': 4900, 'MERIGNAC': 4388, 'Pays de la Loire': 4167, 'Loire-Atlantique': 4146}
+
+==============================================================================================================
+## PROFILE test_source3   [t=6996s]
+==============================================================================================================
+rows=5,082,316  unique ids=5,082,316  prefixes={'S3-': 5082316}
+country counts: {'India': 2405000, 'US': 1945701, 'France': 731615}  raw values: ["'India'", "'France'", "'US'"]
+exact duplicate (name,address,country) rows under different ids: 16,293 (0.32%)
+
+missing / empty rate per column (overall):
+  entity_id         empty=0.000%
+  business_name     empty=0.000%
+  business_address  empty=2.678%
+  country           empty=0.000%
+
+rates per country (fraction of rows):
+country               France   India      US
+name_empty            0.0000  0.0000  0.0000
+addr_empty            0.0294  0.0246  0.0284
+name_placeholder      0.0001  0.0000  0.0000
+addr_placeholder_tok  0.0000  0.0212  0.0280
+name_indic            0.0000  0.1333  0.0000
+addr_indic            0.0000  0.2289  0.0000
+name_accent           0.2394  0.0488  0.0639
+addr_accent           0.1860  0.0004  0.0000
+name_upper            0.0561  0.0247  0.0320
+addr_upper            0.0000  0.0004  0.0000
+name_junk_prefix      0.0369  0.0145  0.0215
+name_handle           0.0370  0.0315  0.0378
+addr_near             0.0000  0.0868  0.0001
+addr_zip_us           0.0007  0.0013  0.0000
+addr_pin6             0.0001  0.0001  0.0010
+addr_5digit           0.0053  0.0069  0.1004
+addr_house_no         0.8476  0.6343  0.8971
+addr_any_digit        0.9338  0.9188  0.9292
+
+length distributions per country (chars / words / comma-parts):
+country             France      India         US
+name_len   count  731615.0  2405000.0  1945701.0
+           mean       21.1       27.9       24.6
+           std         8.1        9.7        9.1
+           min         2.0        2.0        2.0
+           5%         10.0       12.0       11.0
+           25%        16.0       21.0       18.0
+           50%        20.0       28.0       24.0
+           75%        26.0       34.0       30.0
+           95%        36.0       44.0       41.0
+           max        69.0      103.0       85.0
+addr_len   count  731615.0  2405000.0  1945701.0
+           mean       40.0       59.4       38.8
+           std        13.2       27.1       10.0
+           min         0.0        0.0        0.0
+           5%         22.0       20.0       26.0
+           25%        31.0       39.0       34.0
+           50%        41.0       59.0       39.0
+           75%        48.0       78.0       44.0
+           95%        60.0      106.0       53.0
+           max       139.0      267.0      107.0
+name_words count  731615.0  2405000.0  1945701.0
+           mean        3.1        3.8        3.5
+           std         1.1        1.2        1.4
+           min         1.0        1.0        1.0
+           5%          1.0        1.0        1.0
+           25%         3.0        3.0        3.0
+           50%         3.0        4.0        3.0
+           75%         4.0        5.0        4.0
+           95%         5.0        6.0        6.0
+           max        10.0       16.0       13.0
+addr_parts count  731615.0  2405000.0  1945701.0
+           mean        2.6        4.7        3.1
+           std         0.7        1.8        0.7
+           min         0.0        0.0        0.0
+           5%          2.0        3.0        3.0
+           25%         2.0        4.0        3.0
+           50%         3.0        4.0        3.0
+           75%         3.0        6.0        3.0
+           95%         3.0        8.0        4.0
+           max         6.0       21.0        4.0
+
+-- 10 random rows, country=France
+   entity_id             business_name                                       business_address country
+ S3-94181786   Amicale-Marseillaise du      25 R Rue Albert Doyen, Dunkerque, Hauts-de-France  France
+S3-624979045       Chantons Tgavsax SA                           N°23 R. D'arras, Lille, Nord  France
+S3-648411774                 Ets Alter           120 R. D' Anvers, Tourcoing, Hauts-de-France  France
+S3-652097034        Union dû Organisme                       196 Cours De L'argonne, Bordeaux  France
+ S3-84595509       Bonne-Solutions SAS         Nº 257 Route De La Côte D'amour, Saint-nazaire  France
+S3-328131909           Maison  Team EI                      20 Av. Gorge V, Mérignac, Gironde  France
+S3-854905183          Maison Àzar SASU        16 R Des Maraichers, Tourcoing, Hauts-de-France  France
+S3-432383364         Jumelage & Frèrês                         61 R. Du Grand Chsmin, Roubaix  France
+S3-756477686 Saint-Nazaire Parents SAS Saint-nazaire, 18 Rue Du Bods Savary, Loire-Atlantique  France
+S3-375346173       Sourires Groupement     51 Avenue Du Président Jf Kennedy, Pessac, Gironde  France
+
+   top name last-tokens (France): {'sarl': 116201, 'sas': 81901, 'eurl': 34682, 'sa': 29090, 'sasu': 26322, 'sci': 23291, 'france': 18650, 'groupe': 12943, 'fils': 12622, 'club': 11853, 'développement': 11506, 'cie': 7284, 'participations': 6981, 'ecole': 6921, 'holding': 6863, 'international': 6803, 'distribution': 6756, 'amicale': 6735, 'comite': 6379, 's.a.s': 6260}
+   top address last-components (France): {'Hauts-de-France': 85734, 'Nouvelle-Aquitaine': 71925, 'Nord': 65648, 'Gironde': 65344, 'Pays de la Loire': 61870, 'Loire-Atlantique': 55324, 'Bordeaux': 38951, 'Nantes': 34117, 'Lille': 31011, '': 21542, 'Tourcoing': 16277, 'Dunkerque': 15656, 'Roubaix': 14879, 'Calais': 14283, 'Pas-de-Calais': 12158, 'Pessac': 11774, 'Saint-nazaire': 8298, 'La Teste-de-buch': 7949, 'Pornic': 6999, 'Mérignac': 6867}
+   first address component is a region (== some last-component in top-60): 0.1492
+
+-- 10 random rows, country=India
+   entity_id                   business_name                                                                                  business_address country
+S3-637750229              Pragati Jee #86923 Block D-248 D1/188, Mcf 3859, Sanjay Colony Near Nims Hospital Sector 23 Faridabad, Faridabad, HR   India
+S3-703923839    Pc Tech Ventures Private Ltd                                              H.no 698 Makan No.:dx?13, Huzur, Bhopal, मध्य प्रदेश   India
+S3-865291965 குட் சர்வீசஸ் பிரைவேட் லிமிடெட்                                                          Chennai, TN, Chennai 600 042., Old No#75   India
+S3-765641934        Zeb Seva-Samiti Ventures                                                                    North Delhi, Delhi, No 112, DL   India
+ S3-49831903            Sri North  Impex Ltd                    MH, 1St Floor, Bellevue Chs Ltd, Opp Gh, Borivlai East, Mumbai, Office No. 102   India
+S3-755500869       क्रिएटिव Services लिमिटेड                                                                            C-310, Mumbai City, MH   India
+S3-766163953         Svm Traders Private Ltd                                          #6. Brabourne Road Basement Floor, Kolkata, Kolkatta, WB   India
+S3-943063212        Pentagon Foundation Corp                                                                    MH, Pune, H.no 093 Avenue Unit   India
+S3-511937960           Nectar Industries LLP                                                          No.30/a12, Bengaluru, Bangalore, ಕರ್ನಾಟಕ   India
+S3-983293028         Tech Solutions Pvt Ltd.                               C/o Akhilesh Kumar Village-nagara, Post-bheoli, Sarsaul, Kanpur, UP   India
+
+   top name last-tokens (India): {'limited': 651173, 'ltd': 296422, 'private': 136994, 'ड': 122144, 'llp': 76528, 'center': 69285, 'services': 53515, 'ltd.': 46566, 'pvt': 30979, 'co': 28099, 'service': 23198, 'ल': 22597, 'partners': 21531, 'డ': 21282, 'ಡ': 20804, 'corporation': 19467, 'company': 19413, 'corp': 19268, 'límited': 18548, 'ட': 18221}
+   top address last-components (India): {'MH': 310626, 'DL': 195856, 'UP': 119238, 'KA': 114371, 'महाराष्ट्र': 103530, 'TN': 103196, 'GJ': 93001, 'WB': 92848, 'TG': 72787, 'दिल्ली': 65393, '': 59241, 'HR': 57568, 'RJ': 51678, 'KL': 45798, 'उत्तर प्रदेश': 39824, 'ಕರ್ನಾಟಕ': 38189, 'BR': 37390, 'MP': 36645, 'தமிழ்நாடு': 34354, 'ગુજરાત': 31078}
+   first address component is a region (== some last-component in top-60): 0.101
+
+-- 10 random rows, country=US
+   entity_id                           business_name                                  business_address country
+S3-567754027                       Family Fellowship             1801 Dryden Road, Freeville, New York      US
+ S3-69148863 Fluxmira trading as Lopez Select Motors               Barre Town, 24 Cherrywood Drive, VT      US
+S3-442886740                                Brixcalo        1664 Fyler Road, Unit Lot 62, Sullivan, NY      US
+S3-551595494                     Valley Fresh Jersey               9322 Bankside Drive, Houston, Texas      US
+S3-881730641                   Baratta  and Cretella             Illinois, 189 Cadiz Rd, Elizabethtown      US
+S3-415591733                    Tri-State Athena Inc     ##6875 Riverdale Road, NULL, Lanham, Maryland      US
+S3-341245872                       HOUSING GUILD INC                             00216 300, KANB, Utah      US
+S3-483504165                           Price Food-PC 837 St Denis Court, Virginia Ebach CITY, Virginia      US
+S3-847543131          Smartt, Cathyleen T., DPM Corp     2399 Brigantine Ct, Kingsotn CITY, Washington      US
+S3-122996354                                    Hill          24 Auburn St, # 2, Saugus, Massachusetts      US
+
+   top name last-tokens (US): {'llc': 269987, 'inc': 161578, 'corp': 70657, 'partners': 62163, 'co': 61868, 'center': 61120, 'group': 59433, 'ltd': 57850, 'holdings': 48711, 'inc.': 47427, 'services': 38016, 'l.l.c.': 29676, 'lp': 23241, 'service': 18658, 'corporation': 18589, 'pc': 15046, 'associates': 11636, 'pllc': 11519, 'p.c.': 11367, 'incorporated': 10706}
+   top address last-components (US): {'Texas': 157525, 'New York': 120087, 'North Carolina': 112477, 'Ohio': 99654, 'Illinois': 89534, 'Tennessee': 71497, 'Virginia': 70613, 'Arizona': 67827, 'Massachusetts': 66635, 'Indiana': 58713, '': 55317, 'Washington': 50534, 'Maryland': 47872, 'California': 45055, 'Alabama': 38956, 'Wisconsin': 37474, 'Minnesota': 37221, 'Oregon': 35355, 'Kentucky': 34643, 'Arkansas': 32261}
+   first address component is a region (== some last-component in top-60): 0.0898
+
+==============================================================================================================
+## NEW (not in train) COUNTRY DETAIL: France in test_source3  rows=731,615   [t=7114s]
+==============================================================================================================
+   entity_id                       business_name                                       business_address country
+ S3-94181786             Amicale-Marseillaise du      25 R Rue Albert Doyen, Dunkerque, Hauts-de-France  France
+S3-624979045                 Chantons Tgavsax SA                           N°23 R. D'arras, Lille, Nord  France
+S3-648411774                           Ets Alter           120 R. D' Anvers, Tourcoing, Hauts-de-France  France
+S3-652097034                  Union dû Organisme                       196 Cours De L'argonne, Bordeaux  France
+ S3-84595509                 Bonne-Solutions SAS         Nº 257 Route De La Côte D'amour, Saint-nazaire  France
+S3-328131909                     Maison  Team EI                      20 Av. Gorge V, Mérignac, Gironde  France
+S3-854905183                    Maison Àzar SASU        16 R Des Maraichers, Tourcoing, Hauts-de-France  France
+S3-432383364                   Jumelage & Frèrês                         61 R. Du Grand Chsmin, Roubaix  France
+S3-756477686           Saint-Nazaire Parents SAS Saint-nazaire, 18 Rue Du Bods Savary, Loire-Atlantique  France
+S3-375346173                 Sourires Groupement     51 Avenue Du Président Jf Kennedy, Pessac, Gironde  France
+ S3-94960686                            Zetariza    109 Avenue de Magudas, Nouvelle-Aquitaine, Mérignac  France
+S3-354037218                  Comité  de Chronos                              5 Rue Bernos, Lille, Nord  France
+S3-389151974            El (Frânce) Amicale SARL         St.-herblain, Pays de la Loire, 2 R Bourdaloue  France
+S3-687203286                                  CG     12 Route de Brais, Saint-Nazaire, Pays de la Loire  France
+S3-964389953 Soldelta Labs F/K/A Club des Choeur 27 Avenue Courteline, Saint-Herblain, Pays de la Loire  France
+S3-905947431      La Teste-De-Buch Club S.A.R.L.        2 A Rue André Dignac, La Teste-de-buch, Gironde  France
+S3-426012275                     Football Maison              21 Bis R. De Romainville, Pessac, Gironde  France
+S3-276447616                SNE Section S.A.S.U.     Boulevard Auguste Pageot, Nantes, Pays de la Loire  France
+S3-745567083  Communale Groupement (France) Eurl                        Nº 24 Rue De Nottingham, Calais  France
+S3-970308726                    Radio Patrimoine                                49 R. James Watt, Lille  France
+
+legal-form tokens in NAME: {'SARL': np.float64(0.2007), 'SAS': np.float64(0.1537), 'EURL': np.float64(0.063), '(France)': np.float64(0.0625), 'SA': np.float64(0.0519), 'SASU': np.float64(0.0469), 'SCI': np.float64(0.0411), 'Ets/Établissements': np.float64(0.0381), 'Groupe': np.float64(0.0357), 'Cie/Compagnie': np.float64(0.0335), 'Association': np.float64(0.0158), 'SNC': np.float64(0.0109), 'EI/EIRL': np.float64(0.01), 'SCOP': np.float64(0.0), 'SELARL': np.float64(0.0), 'SCM': np.float64(0.0), 'GIE': np.float64(0.0)}
+
+street-type tokens in ADDRESS: {'rue': np.float64(0.3942), 'r': np.float64(0.2434), 'av/ave': np.float64(0.1276), 'avenue': np.float64(0.0678), 'ZI/ZA/ZAC': np.float64(0.0607), 'ch/chem': np.float64(0.0557), 'bis/ter': np.float64(0.0354), 'allée': np.float64(0.0285), 'boulevard': np.float64(0.0204), 'bd/bld/blvd': np.float64(0.0204), 'all': np.float64(0.0178), 'impasse': np.float64(0.0113), 'route': np.float64(0.0095), 'chemin': np.float64(0.0083), 'pl': np.float64(0.0082), 'imp': np.float64(0.0082), 'rte': np.float64(0.0079), 'place': np.float64(0.0072), 'cours': np.float64(0.0047), 'quai': np.float64(0.0043), 'square/sq': np.float64(0.0032), 'crs': np.float64(0.0031), 'faubourg/fbg': np.float64(0.0017), 'lieu-dit': np.float64(0.0015), 'BP': np.float64(0.0005), 'cedex': np.float64(0.0001)}
+
+accented chars: name=0.239 addr=0.186  | ALL-CAPS 'RUE': 0.003
+standalone 5-digit (postcode-like) rate: 0.0053; examples: ['Hauts-de-France, 00223 Rue Faidherbe, Lille', '00114 Rue Royale, Lille, Nord', '00217 Avenue About, Dunkerque', 'R De La Malcense, Bp 80506, Tourcoing', '9 Ch De La Huossiniere, Bp 72616, Nantes, Loire-Atlantique', '00155 Rue De Chantilly, Calais', '50 R Digon - Cs 41195, Bordeaux, Nouvelle-Aquitaine', '00185 Rue Du Vauxhall, Calais, Hauts-de-France']
+top address last-components: {'Hauts-de-France': 85734, 'Nouvelle-Aquitaine': 71925, 'Nord': 65648, 'Gironde': 65344, 'Pays de la Loire': 61870, 'Loire-Atlantique': 55324, 'Bordeaux': 38951, 'Nantes': 34117, 'Lille': 31011, '': 21542, 'Tourcoing': 16277, 'Dunkerque': 15656, 'Roubaix': 14879, 'Calais': 14283, 'Pas-de-Calais': 12158, 'Pessac': 11774, 'Saint-nazaire': 8298, 'La Teste-de-buch': 7949, 'Pornic': 6999, 'Mérignac': 6867, 'La Baule-escoublac': 4908, 'Saint-herblain': 4199, 'Lège-cap-ferret': 3987, 'Merignac': 2448, 'Lege-cap-ferret': 1753}
+top 2nd-to-last components (city?): {'Bordeaux': 73194, 'Nantes': 63172, 'Lille': 57950, 'Tourcoing': 30886, 'Dunkerque': 28969, 'Roubaix': 27717, 'Calais': 26967, 'Pessac': 21366, 'Saint-nazaire': 14489, 'La Teste-de-buch': 13739, 'Pornic': 13576, 'Mérignac': 13187, 'La Baule-escoublac': 8498, 'Saint-herblain': 7470, 'Lège-cap-ferret': 6894, 'Hauts-de-France': 6554, 'Nouvelle-Aquitaine': 5501, 'Nord': 5121, 'Gironde': 4999, 'Pays de la Loire': 4644, 'Merignac': 4385, 'Loire-Atlantique': 4177, 'Saint-Nazaire': 3904, 'La Teste-de-Buch': 3253, 'Lege-cap-ferret': 2922}
+
+==============================================================================================================
+## TRAIN vs TEST comparison (per file x country)   [t=7133s]
+==============================================================================================================
+                          rows  name_len_med  addr_len_med  addr_empty  name_indic  addr_indic  name_accent  name_upper  addr_upper  name_junk_prefix  addr_house_no  addr_zip_us  addr_pin6  addr_5digit
+file          country                                                                                                                                                                                    
+train_source1 India     883188          27.0          76.0      0.0000      0.0000      0.0000       0.0000      0.0000      0.0000            0.0001         0.6565       0.0005     0.0002       0.0019
+              US       1323633          22.0          34.0      0.0000      0.0000      0.0000       0.0000      0.0000      0.0000            0.0014         0.9951       0.0000     0.0012       0.1095
+train_source2 India    2017799          27.0          68.0      0.0287      0.2351      0.2367       0.0437      0.1494      0.2387            0.0151         0.6348       0.0021     0.0001       0.0076
+              US       3016817          23.0          32.0      0.0368      0.0000      0.0000       0.0670      0.2155      0.8981            0.0242         0.8712       0.0000     0.0009       0.0974
+train_source3 India    2115547          27.0          58.0      0.0307      0.1317      0.2249       0.0532      0.0258      0.0004            0.0162         0.6149       0.0014     0.0001       0.0070
+              US       3170056          23.0          39.0      0.0350      0.0000      0.0000       0.0680      0.0320      0.0000            0.0233         0.8793       0.0001     0.0009       0.0980
+test_source1  France    259452          19.0          48.0      0.0000      0.0000      0.0000       0.1572      0.0000      0.0000            0.0379         0.9938       0.0016     0.0001       0.0041
+              India     809986          27.0          76.0      0.0000      0.0000      0.0000       0.0000      0.0000      0.0000            0.0001         0.6558       0.0004     0.0001       0.0018
+              US        663106          22.0          34.0      0.0000      0.0000      0.0000       0.0000      0.0000      0.0000            0.0014         0.9951       0.0000     0.0012       0.1094
+test_source2  France    703378          20.0          40.0      0.0306      0.0000      0.0000       0.2454      0.2080      0.2898            0.0382         0.8425       0.0011     0.0001       0.0051
+              India    2312565          28.0          68.0      0.0228      0.2364      0.2381       0.0398      0.1412      0.2400            0.0135         0.6540       0.0021     0.0001       0.0074
+              US       1871330          24.0          32.0      0.0294      0.0000      0.0000       0.0625      0.2042      0.9048            0.0220         0.8904       0.0000     0.0009       0.0993
+test_source3  France    731615          20.0          41.0      0.0294      0.0000      0.0000       0.2394      0.0561      0.0000            0.0369         0.8476       0.0007     0.0001       0.0053
+              India    2405000          28.0          59.0      0.0246      0.1333      0.2289       0.0488      0.0247      0.0004            0.0145         0.6343       0.0013     0.0001       0.0069
+              US       1945701          24.0          39.0      0.0284      0.0000      0.0000       0.0639      0.0320      0.0000            0.0215         0.8971       0.0000     0.0010       0.1004
+
+done in 7133s

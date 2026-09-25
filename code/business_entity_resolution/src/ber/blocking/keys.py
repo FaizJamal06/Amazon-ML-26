@@ -99,7 +99,7 @@ def _get_rarest_tokens(tokens: list[str], idf: dict[str, float], k: int = 3,
 def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                     idf: dict[str, float], country_df: dict[str, int],
                     skel_idf: dict[str, float], skel_df: dict[str, int],
-                    country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 15) -> tuple[pl.LazyFrame, int]:
+                    country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 50) -> tuple[pl.LazyFrame, int]:
     """Pass A: name-token blocking. For each S2/S3 record, find S1s sharing rare name tokens.
 
     Direction: S2/S3 → S1 (each S2/S3 retrieves its top-k S1 candidates).
@@ -190,7 +190,7 @@ def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
 
 def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                      idf: dict[str, float], country_df: dict[str, int],
-                     country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 2, top_k_per_query: int = 15) -> tuple[pl.LazyFrame, int]:
+                     country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 2, top_k_per_query: int = 50) -> tuple[pl.LazyFrame, int]:
     """Pass B: address blocking. Key = house_num + each of the rarest addr_street tokens.
 
     Direction: S2/S3 → S1, within country.

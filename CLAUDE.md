@@ -143,7 +143,11 @@ Contracts per artifact name (`split ∈ {train, test}` unless marked train-only)
   (legal form removed), `legal_form` (canonical or ""), `addr_norm, addr_street` (addr_norm minus house number and
   region/city tokens), `house_num` (primary number as string, "" if none), `addr_nums (list[str])`, `name_tokens (list[str])`
 - `candidates`: `s1_id, cand_id, country, block_mask (int bitmask of passes), tfidf_name, tfidf_full, knn_rank,
-  rank_in_cand` (rank of this S1 among the S1s retrieved for this candidate, 1 = best), `block_score` (best pass score)
+  rank_in_cand` (rank of this S1 among ALL S1s retrieved for this candidate, before any cap, by rank_score; 1 = best),
+  `block_score` (sum over passes of the pass score normalized to 0–1 within the country, so 0–n_passes),
+  `rank_score` (cheap re-rank similarity, ≈ −0.2…1: 0.45·token_set(name_core) + 0.15·ratio(name_skeleton) +
+  0.30·token_set(addr_street) + 0.10·[house_num equal] − 0.20·[house_num conflict]; each S2/S3 keeps its top
+  `blocking.k_per_query` S1s by it, then each S1 at most `max_cands`)
 - `folds` (train only): `s1_id, fold (0–4), country, n_matches`
 - `subworld` (train only): `entity_id, source, role` (`s1` | `match` | `decoy`) — the closed sub-world (§6). The
   `subworld` stage also writes `records`, `gt` and `candidates` with `subworld=True` (`*_train_sw.parquet`), restricted

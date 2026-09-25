@@ -63,6 +63,28 @@ The producer's code must also be on `main` (merged PR) before anyone depends on 
 - Candidates late past 19:30 → Nitish trains on a 100k-S1 world that Dhanishkaa blocks locally.
 - LightGBM not ready by 22:00 → Submission 1 uses Faiz's rule-based fallback scorer (block_score + house_num
   relation + name similarity, threshold tuned on the train sub-world).
+- Full test run not finished and validated by 23:15 → skip the Day-1 submission. An unused slot costs nothing;
+  a rushed, unvalidated file wastes a slot and can mislead us with a bad score.
+
+**Corrections to the Day-1 prompts.** The Day-1 prompts used `cache/{split}/...` paths; the only valid names are the
+`cfg.artifact()` ones:
+- ingest writes `source{1,2,3}_{split}` + `gt_train`;
+- normalization writes `records_{split}`;
+- blocking writes `candidates_{split}` (with `rank_in_cand`, `block_score`);
+- features/scores write `features_{split}` / `scores_{split}`.
+
+Always read and write through `cfg.artifact(name, split, subworld)`.
+
+### Status board
+
+| Person | Current task | Blocked on | Next handoff |
+|---|---|---|---|
+| Faiz | R1 merged. Now: fallback scorer, errors.py, decide v2 (branch r1/decide-v2) | real candidates_train for blocking report + sub-world | subworld_train → Nitish, ≤30 min after candidates land |
+| Dhanishkaa | normalization + blocking v1 | source parquet from Chris (16:30) | records_train + candidates_train by 19:00 |
+| Nitish | features v1 + LightGBM on stub | subworld_train from Faiz (~19:30) | OOF scores_train by 21:00 |
+| Chris | AWS setup + ingest | — | source{1,2,3}_{train,test} + gt_train by 16:30; full test run by 22:30 |
+
+Each person updates their row at every sync (13:00 / 19:00 / 23:00) and when a handoff lands.
 
 ## Timeline (IST)
 

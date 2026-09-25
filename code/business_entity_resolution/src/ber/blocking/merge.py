@@ -37,88 +37,66 @@ PASS_NAMES: dict[int, str] = {
 
 
 def _merge_passes(pass_results: list[tuple[pl.LazyFrame, int]]) -> pl.LazyFrame:
-    """Merge multiple blocking pass results into a single LazyFrame with a bitmask.
+    """Merge the blocking passes of one country into (s1_id, cand_id, block_mask, block_score).
+
+    Each pass scores on its own scale, so its score is first normalized to 0-1 within the country
+    (score / that pass's max score). block_mask ORs the pass bits; block_score = sum of the normalized
+    pass scores (0 to n_passes).
 
     Args:
-        pass_results: list of (lazy_pairs, bit_position) where lazy_pairs has (cand_id, s1_id, score).
+        pass_results: list of (lazy_pairs, bit_position) where lazy_pairs has (cand_id, s1_id, score) for one country.
 
     Returns:
         LazyFrame with (s1_id, cand_id, block_mask, block_score).
     """
-    all_pairs = []
-    for lazy_pairs, bit in pass_results:
-        tagged = lazy_pairs.with_columns(
-            bit_val=pl.lit(1 << bit, dtype=pl.Int32),
-        )
-        all_pairs.append(tagged)
-
-    if not all_pairs:
+    if not pass_results:
         return pl.DataFrame(schema={
             "s1_id": pl.String, "cand_id": pl.String,
             "block_mask": pl.Int32, "block_score": pl.Float64,
         }).lazy()
-
-    merged = pl.concat(all_pairs)
-
-    # Group by (s1_id, cand_id): OR the bitmask, take the max score
-    result = (
-        merged
-        .group_by("s1_id", "cand_id")
-        .agg(
-            block_mask=pl.col("bit_val").bitwise_or(),
-            block_score=pl.col("score").max(),
-        )
+    merged = pl.concat([
+        lazy_pairs.select("s1_id", "cand_id",
+                          score=(pl.col("score").cast(pl.Float64) / pl.col("score").max()).fill_nan(0.0),
+                          bit_val=pl.lit(1 << bit, dtype=pl.Int32))
+        for lazy_pairs, bit in pass_results
+    ])
+    return merged.group_by("s1_id", "cand_id").agg(
+        block_mask=pl.col("bit_val").bitwise_or(),
+        block_score=pl.col("score").sum(),
     )
 
-    return result
 
+def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
+                    max_cands: int = 10, min_score: float | None = None) -> pl.DataFrame:
+    """Rank, then cap: per S2/S3 keep the top k S1s, then per S1 keep the top max_cands candidates.
 
-def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 4,
-                    max_cands: int = 15, min_score: float = 0.0) -> pl.DataFrame:
-    """Cap candidates: per S2/S3 keep top k S1s, then per S1 cap at max_cands by block_score.
+    Ordering everywhere: n_passes (bits set in block_mask) desc, block_score desc, s1_id asc, cand_id asc
+    (deterministic ties). rank_in_cand (1 = best S1 for this cand_id) is computed on the full retrieval list,
+    BEFORE min_score / k_per_query / max_cands remove anything.
 
     Args:
         candidates: DataFrame with (s1_id, cand_id, block_mask, block_score).
         k_per_query: per S2/S3 record, keep at most this many S1 candidates.
         max_cands: per S1, cap total candidates at this number.
-        min_score: floor value for block_score.
+        min_score: drop pairs with block_score below this (None or 0 = off).
 
     Returns:
-        Capped DataFrame with added rank_in_cand column.
+        Capped DataFrame with an added rank_in_cand column.
     """
-    # Floor by min_score
-    if min_score > 0:
-        candidates = candidates.filter(pl.col("block_score") >= min_score)
-
-    # Add rank_in_cand: rank of this S1 among all S1s retrieved for this cand_id (1 = best)
-    # MUST be computed on the full retrieval list BEFORE capping!
-    capped = candidates.with_columns(
-        rank_in_cand=pl.col("block_score")
-        .rank("ordinal", descending=True)
-        .over("cand_id")
-        .cast(pl.Int32)
+    ranked = (
+        candidates
+        .with_columns(_n_passes=pl.col("block_mask").bitwise_count_ones())
+        .sort(["_n_passes", "block_score", "s1_id", "cand_id"], descending=[True, True, False, False])
+        .with_columns(rank_in_cand=(pl.int_range(pl.len()).over("cand_id") + 1).cast(pl.Int32))
     )
-
-    # Per cand_id (S2/S3): keep top k S1s by block_score
-    capped = (
-        capped
+    if min_score:
+        ranked = ranked.filter(pl.col("block_score") >= min_score)
+    return (
+        ranked
         .filter(pl.col("rank_in_cand") <= k_per_query)
+        .filter(pl.int_range(pl.len()).over("s1_id") < max_cands)   # same ordering, frame is still sorted
+        .drop("_n_passes")
     )
-
-    # Per S1: cap at max_cands by block_score
-    capped = (
-        capped
-        .with_columns(
-            rank_for_s1=pl.col("block_score")
-            .rank("ordinal", descending=True)
-            .over("s1_id")
-            .cast(pl.Int32)
-        )
-        .filter(pl.col("rank_for_s1") <= max_cands)
-        .drop("rank_for_s1")
-    )
-
-    return capped
 
 
 def build_candidates(cfg: Config, split: str, subworld: bool = False,
@@ -218,10 +196,10 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
 
     # Cap candidates: keep top k_per_query per query, cap at max_cands per S1
     if max_cands is None:
-        max_cands = getattr(cfg, "max_cands", 15)
+        max_cands = cfg.max_cands
     if k_per_query is None:
-        k_per_query = getattr(cfg, "k_per_query", 3)
-    min_score = getattr(cfg, "blocking_min_score", getattr(cfg.blocking, "min_score", 0.0)) if hasattr(cfg, "blocking") else 0.0
+        k_per_query = int(cfg.get("blocking.k_per_query", 2))
+    min_score = cfg.get("blocking.min_score", None)   # None or 0 = off
     print(f"  capping: k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}")
     candidates = _cap_candidates(candidates, k_per_query=k_per_query, max_cands=max_cands, min_score=min_score)
     print(f"  after capping: {candidates.height:,} pairs, "

@@ -150,6 +150,20 @@ def _train_only(stage: str, split: str) -> None:
         raise SystemExit(f"{stage} needs ground truth: use --split train")
 
 
+def stage_errors(cfg: Config, split: str, subworld: bool) -> None:
+    """Markdown error report (worst FP / FN, summaries) -> reports/errors_{split}[_sw]_{scores_name}.md."""
+    from ber.eval.errors import error_report, write_report
+    _train_only("errors", split)
+    scores_name = cfg.get("decide.scores_name", "scores")
+    arts = {n: _read(cfg, n, split, subworld) for n in ("matches", "candidates", "records", "gt")}
+    title = f"Errors — {split}{' sub-world' if subworld else ''}, {scores_name}, config {cfg.hash}, commit {git_commit()}"
+    text = error_report(arts["matches"], _read(cfg, scores_name, split, subworld), arts["candidates"],
+                        arts["records"], arts["gt"], title, seed=cfg.seed)
+    path = write_report(text, cfg.path("reports_dir") / f"errors_{split}{'_sw' if subworld else ''}_{scores_name}.md")
+    print(text.split("\n## ")[0])
+    print(f"report -> {path}")
+
+
 def stage_fallback_train(cfg: Config, split: str, subworld: bool) -> None:
     """Fallback scorer: OOF calibrated ``scores_fallback`` on train + saved model (ber.fallback)."""
     from ber.fallback import fallback_train
@@ -164,7 +178,7 @@ def stage_fallback_predict(cfg: Config, split: str, subworld: bool) -> None:
 
 R1_STAGES: dict[str, Callable[[Config, str, bool], None]] = {
     "fallback-train": stage_fallback_train, "fallback-predict": stage_fallback_predict,
-    "folds": stage_folds, "subworld": stage_subworld, "blocking-report": stage_blocking_report,
+    "errors": stage_errors, "folds": stage_folds, "subworld": stage_subworld, "blocking-report": stage_blocking_report,
     "decide": stage_decide, "submit": stage_submit,
 }
 

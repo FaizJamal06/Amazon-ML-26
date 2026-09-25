@@ -26,4 +26,5 @@ paths:
     source3: student_resource/dataset/test/test_source3.tsv
   cache_dir: cache
   output_dir: output
+  reports_dir: reports
   validator: student_resource/utils/validate_submission.py

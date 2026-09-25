@@ -76,3 +76,18 @@ def macro_f05_by(pred: pl.DataFrame, gt: pl.DataFrame, s1: pl.DataFrame, by: str
         .agg(n_s1=pl.len(), macro_f05=pl.col("f05").mean(), singleton_share=(pl.col("n_gt") == 0).mean())
         .sort(by)
     )
+
+
+def s1_groups(records: pl.DataFrame, gt: pl.DataFrame) -> pl.DataFrame:
+    """S1 universe ``(s1_id, country, script)`` for per-group scores.
+
+    ``script`` = ``native`` if any GT match of the S1 has a non-Latin ``name_script``, ``latin`` if it has matches
+    and all are Latin, ``singleton`` if it has none (S1 names themselves are always Latin).
+    """
+    s1 = records.filter(pl.col("source") == 1).select(s1_id="entity_id", country="country")
+    native = (_pairs(gt).join(records.select(match_id="entity_id", name_script="name_script"), on="match_id", how="left")
+              .group_by("s1_id").agg(_native=(pl.col("name_script").fill_null("Latin") != "Latin").any()))
+    return (s1.join(native, on="s1_id", how="left")
+            .with_columns(script=pl.when(pl.col("_native").is_null()).then(pl.lit("singleton"))
+                          .when(pl.col("_native")).then(pl.lit("native")).otherwise(pl.lit("latin")))
+            .drop("_native"))

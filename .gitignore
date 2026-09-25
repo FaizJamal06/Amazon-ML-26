@@ -12,6 +12,8 @@ cache/
 artifacts/
 # submission files are hundreds of MB -> stored on Drive/S3, tracked by sha256 in notes/SUBMISSIONS.md
 output/
+# generated error / comparison reports (may contain raw records)
+reports/
 
 # --- models & weights ---
 models/

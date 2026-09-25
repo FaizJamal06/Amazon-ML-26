@@ -30,8 +30,13 @@ OWNER_STAGES: dict[str, tuple[str, str, str]] = {
     "train": ("ber.model.lgbm", "train_oof", "Nitish (R3)"),               # -> scores_train.parquet (OOF)
     "predict": ("ber.model.lgbm", "predict", "Nitish (R3)"),               # -> scores_test.parquet
 }
-CHAIN = {"train": ["ingest", "normalize", "block", "folds", "featurize", "train", "decide"],
-         "test": ["ingest", "normalize", "block", "featurize", "predict", "decide", "submit"]}
+CHAIN = {  # (split, scorer) -> stages run by ``all``
+    ("train", "lgbm"): ["ingest", "normalize", "block", "folds", "featurize", "train", "decide"],
+    ("test", "lgbm"): ["ingest", "normalize", "block", "featurize", "predict", "decide", "submit"],
+    ("train", "fallback"): ["ingest", "normalize", "block", "folds", "fallback-train", "decide"],
+    ("test", "fallback"): ["ingest", "normalize", "block", "fallback-predict", "decide", "submit"],
+}
+SCORES_BY_SCORER = {"lgbm": "scores", "fallback": "scores_fallback"}
 
 
 def peak_memory_mb() -> float:
@@ -111,20 +116,67 @@ def stage_blocking_report(cfg: Config, split: str, subworld: bool) -> None:
     print(to_markdown(blocking_report(*(_read(cfg, n, split, subworld) for n in ("candidates", "gt", "records")))))
 
 
+def _decide_params(cfg: Config) -> dict:
+    """Selection parameters from the ``decide`` config block."""
+    return dict(threshold=float(cfg.get("decide.threshold")), topk=int(cfg.get("decide.topk", 15)),
+                miss_mass=float(cfg.get("decide.miss_mass", 0.0)), margin=cfg.decision_margin)
+
+
 def stage_decide(cfg: Config, split: str, subworld: bool) -> None:
-    """One-to-one + v1 threshold -> matches_{split}.parquet; on train also prints the OOF threshold curve."""
+    """One-to-one + ``decide.method`` selection -> matches_{split}.parquet; on train also prints the OOF threshold curve
+    and the OOF macro F0.5 of the configured method."""
     from ber.decide.assign import assign_one_to_one
-    from ber.decide.select import best_threshold, select_threshold, threshold_curve, threshold_grid
-    scores, cand = _read(cfg, "scores", split, subworld), _read(cfg, "candidates", split, subworld)
+    from ber.decide.select import best_threshold, select, threshold_curve, threshold_grid
+    from ber.eval.metric import macro_f05
+    scores_name, method = cfg.get("decide.scores_name", "scores"), cfg.get("decide.method", "threshold")
+    scores, cand = _read(cfg, scores_name, split, subworld), _read(cfg, "candidates", split, subworld)
+    print(f"decide: reading {scores_name}, method {method}")
     if split == "train":
         curve = threshold_curve(scores, _read(cfg, "gt", split, subworld), _s1_universe(cfg, split, subworld),
                                 threshold_grid(*cfg.get("decide.grid")), cand, cfg.decision_margin)
         with pl.Config(tbl_rows=50, float_precision=4):
             print(curve)
         print(f"best OOF threshold: {best_threshold(curve)} (config decide.threshold = {cfg.get('decide.threshold')})")
-    sel = select_threshold(assign_one_to_one(scores, cand), float(cfg.get("decide.threshold")), cfg.decision_margin)
+    sel = select(assign_one_to_one(scores, cand), method, **_decide_params(cfg))
     sel.write_parquet(cfg.artifact("matches", split, subworld))
+    if split == "train":
+        f = macro_f05(sel, _read(cfg, "gt", split, subworld), _s1_universe(cfg, split, subworld))
+        print(f"OOF macro F0.5 with {method}: {f:.4f}")
     print(f"{sel.height:,} matched pairs over {sel['s1_id'].n_unique():,} S1s")
+
+
+def stage_compare_decide(cfg: Config, split: str, subworld: bool) -> None:
+    """OOF macro F0.5 of threshold (best t) vs ef05_approx vs ef05_exact: overall / per country / per script + runtime.
+
+    Note: the threshold row picks t on the same OOF it is scored on (slightly optimistic); ef05 has no tuned knob.
+    """
+    from ber.decide.assign import assign_one_to_one
+    from ber.decide.select import best_threshold, select, threshold_curve, threshold_grid
+    from ber.eval.metric import macro_f05_by, per_entity_f05, s1_groups
+    _train_only("compare-decide", split)
+    scores_name = cfg.get("decide.scores_name", "scores")
+    rec, gt, cand = (_read(cfg, n, split, subworld) for n in ("records", "gt", "candidates"))
+    s1 = s1_groups(rec, gt)
+    assigned = assign_one_to_one(_read(cfg, scores_name, split, subworld), cand)
+    params = _decide_params(cfg)
+    t0 = time.time()
+    params["threshold"] = best_threshold(threshold_curve(assigned, gt, s1, threshold_grid(*cfg.get("decide.grid")),
+                                                         margin=cfg.decision_margin))
+    rows = []
+    for method in ("threshold", "ef05_approx", "ef05_exact"):
+        t1 = time.time()
+        sel = select(assigned, method, **params)
+        secs = time.time() - t1 + (t1 - t0 if method == "threshold" else 0.0)
+        row = {"method": method + (f" (t={params['threshold']})" if method == "threshold" else ""),
+               "macro_f05": per_entity_f05(sel, gt, s1)["f05"].mean(), "pred_pairs": sel.height,
+               "runtime_s": round(secs, 2)}
+        for by in ("country", "script"):
+            row.update({f"{by}={g}": v for g, v in macro_f05_by(sel, gt, s1, by).select(by, "macro_f05").iter_rows()})
+        rows.append(row)
+    with pl.Config(tbl_cols=-1, tbl_width_chars=250, float_precision=4):
+        print(f"compare-decide on {scores_name} ({'sub-world' if subworld else 'full world'}), "
+              f"topk={params['topk']}, miss_mass={params['miss_mass']}, margin={params['margin']}")
+        print(pl.DataFrame(rows))
 
 
 def stage_submit(cfg: Config, split: str, subworld: bool) -> None:
@@ -148,8 +200,35 @@ def _train_only(stage: str, split: str) -> None:
         raise SystemExit(f"{stage} needs ground truth: use --split train")
 
 
+def stage_errors(cfg: Config, split: str, subworld: bool) -> None:
+    """Markdown error report (worst FP / FN, summaries) -> reports/errors_{split}[_sw]_{scores_name}.md."""
+    from ber.eval.errors import error_report, write_report
+    _train_only("errors", split)
+    scores_name = cfg.get("decide.scores_name", "scores")
+    arts = {n: _read(cfg, n, split, subworld) for n in ("matches", "candidates", "records", "gt")}
+    title = f"Errors — {split}{' sub-world' if subworld else ''}, {scores_name}, config {cfg.hash}, commit {git_commit()}"
+    text = error_report(arts["matches"], _read(cfg, scores_name, split, subworld), arts["candidates"],
+                        arts["records"], arts["gt"], title, seed=cfg.seed)
+    path = write_report(text, cfg.path("reports_dir") / f"errors_{split}{'_sw' if subworld else ''}_{scores_name}.md")
+    print(text.split("\n## ")[0])
+    print(f"report -> {path}")
+
+
+def stage_fallback_train(cfg: Config, split: str, subworld: bool) -> None:
+    """Fallback scorer: OOF calibrated ``scores_fallback`` on train + saved model (ber.fallback)."""
+    from ber.fallback import fallback_train
+    fallback_train(cfg, split, subworld)
+
+
+def stage_fallback_predict(cfg: Config, split: str, subworld: bool) -> None:
+    """Fallback scorer: ``scores_fallback`` for the given split from the saved model (ber.fallback)."""
+    from ber.fallback import fallback_predict
+    fallback_predict(cfg, split, subworld)
+
+
 R1_STAGES: dict[str, Callable[[Config, str, bool], None]] = {
-    "folds": stage_folds, "subworld": stage_subworld, "blocking-report": stage_blocking_report,
+    "fallback-train": stage_fallback_train, "fallback-predict": stage_fallback_predict,
+    "compare-decide": stage_compare_decide, "errors": stage_errors, "folds": stage_folds, "subworld": stage_subworld, "blocking-report": stage_blocking_report,
     "decide": stage_decide, "submit": stage_submit,
 }
 
@@ -185,10 +264,13 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--subworld", action="store_true", help="run on the closed sub-world (cfg.subworld_frac)")
     ap.add_argument("--config", help="override yaml merged on top of configs/base.yaml")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="dotted override, repeatable")
+    ap.add_argument("--scorer", choices=list(SCORES_BY_SCORER),
+                    help="lgbm (scores) or fallback (scores_fallback): picks the 'all' chain and decide.scores_name")
     args = ap.parse_args(argv)
-    cfg = load_config(args.config, args.set)
+    sets = ([f"decide.scores_name={SCORES_BY_SCORER[args.scorer]}"] if args.scorer else []) + args.set  # --set wins
+    cfg = load_config(args.config, sets)
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
-    for stage in CHAIN[args.split] if args.stage == "all" else [args.stage]:
+    for stage in CHAIN[args.split, args.scorer or "lgbm"] if args.stage == "all" else [args.stage]:
         run(stage, cfg, args.split, args.subworld)
 
 

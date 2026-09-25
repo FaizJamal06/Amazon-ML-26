@@ -6,8 +6,15 @@ max_cands: 50            # cap on candidates per S1 after merging blocking passe
 decision_margin: 0.0     # extra conservatism in set selection; tuned with LB feedback (test is denser)
 
 decide:
+  method: threshold      # threshold | ef05_exact | ef05_approx (v2 only after it wins on real full-world OOF)
+  miss_mass: 0.0         # expected true matches per S1 that blocking missed (ef05 methods)
+  topk: 15               # candidates per S1 kept for ef05 selection
   threshold: 0.5         # v1 global threshold on calibrated p after one-to-one assignment (tuned on OOF)
   grid: [0.30, 0.95, 0.05]   # start, stop (inclusive), step for the OOF threshold sweep
+  scores_name: scores    # which scores artifact decide reads: scores (LightGBM) | scores_fallback
+
+fallback:
+  max_train_s1: 300000   # S1s (with all their pairs) per fold model of the fallback scorer
 
 paths:
   data_dir: student_resource/dataset
@@ -22,4 +29,5 @@ paths:
     source3: student_resource/dataset/test/test_source3.tsv
   cache_dir: cache
   output_dir: output
+  reports_dir: reports
   validator: student_resource/utils/validate_submission.py

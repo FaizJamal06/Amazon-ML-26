@@ -18,7 +18,8 @@ SCORERS = {"ratio": (fuzz.ratio, 100.0), "tset": (fuzz.token_set_ratio, 100.0),
            "tsort": (fuzz.token_sort_ratio, 100.0), "partial": (fuzz.partial_ratio, 100.0),
            "jw": (JaroWinkler.normalized_similarity, 1.0)}
 SCRIPTS = ["Latin", "Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Odia", "Tamil", "Telugu", "Kannada",
-           "Malayalam"]  # R2's detect_script labels; anything else -> code len(SCRIPTS) ("other")
+           "Malayalam"]  # R2's detect_script labels. Fixed in code: never built from data, same for train and test
+SCRIPT_OTHER = len(SCRIPTS)  # reserved code for any unseen (or null) script
 
 
 def cpdist(a: list[str], b: list[str], scorer, scale: float = 100.0) -> np.ndarray:
@@ -45,8 +46,8 @@ def _len_ratio(a: str, b: str) -> pl.Expr:
 
 
 def _script_code(col: str) -> pl.Expr:
-    """Integer code of a ``name_script`` column (fixed vocabulary, unknown scripts share one code)."""
-    return pl.col(col).replace_strict(SCRIPTS, list(range(len(SCRIPTS))), default=len(SCRIPTS), return_dtype=pl.Int8)
+    """Integer code of a ``name_script`` column: index in ``SCRIPTS``, or ``SCRIPT_OTHER`` for anything else."""
+    return pl.col(col).replace_strict(SCRIPTS, list(range(len(SCRIPTS))), default=SCRIPT_OTHER, return_dtype=pl.Int8)
 
 
 def pairwise_features(df: pl.DataFrame) -> pl.DataFrame:

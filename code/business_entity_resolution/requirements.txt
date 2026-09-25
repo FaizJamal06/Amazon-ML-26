@@ -7,8 +7,8 @@ pyyaml==6.0.3
 polars==1.44.2
 scikit-learn==1.9.1
 joblib==1.6.0
+lightgbm==4.7.0
 
 # Planned — pin the exact version when first added:
 # duckdb==
-# lightgbm==
 # anyascii==

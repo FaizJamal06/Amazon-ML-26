@@ -164,21 +164,24 @@ def query_name_index(index: Index, query_records: pl.DataFrame, idf: dict[str, f
 
 def _street_keys(row: dict, idf: dict[str, float], country_df: dict[str, int], freq_cap: int,
                  k_tokens: int) -> list[tuple[str, str]]:
-    """(house_num, rare street token) keys of a record; [] when it has no house number."""
-    house = row["house_num"] or ""
-    if not house:
+    """(number, rare street token) keys for EVERY number in the address (addr_nums, not only house_num), so a
+    spurious extra number ('818 F-25', 'No. 337 1/598') does not hide the real one; [] when there is no number."""
+    nums = list(dict.fromkeys(n for n in (row["addr_nums"] or []) if n))
+    if not nums:
         return []
     street_tokens = (row["addr_street"] or "").split()
     if not street_tokens:
-        street_tokens = [t for t in (row["addr_norm"] or "").split() if t != house and t.lstrip("0") != house]
-    return [(house, t) for t in _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)]
+        num_set = set(nums)
+        street_tokens = [t for t in (row["addr_norm"] or "").split() if t not in num_set and t.lstrip("0") not in num_set]
+    rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)
+    return [(n, t) for n in nums for t in rare]
 
 
 def build_address_index(s1_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
                         freq_cap: int = 2000, k_tokens: int = 2) -> Index:
-    """Pass B index, built once per country: (house_num, rare street token) -> [(s1_id, idf)]."""
+    """Pass B index, built once per country: (any address number, rare street token) -> [(s1_id, idf)]."""
     index: Index = {}
-    for row in s1_records.select("entity_id", "house_num", "addr_street", "addr_norm").iter_rows(named=True):
+    for row in s1_records.select("entity_id", "addr_nums", "addr_street", "addr_norm").iter_rows(named=True):
         for key in _street_keys(row, idf, country_df, freq_cap, k_tokens):
             index.setdefault(key, []).append((row["entity_id"], idf.get(key[1], 10.0)))
     return index
@@ -187,9 +190,10 @@ def build_address_index(s1_records: pl.DataFrame, idf: dict[str, float], country
 def query_address_index(index: Index, query_records: pl.DataFrame, idf: dict[str, float],
                         country_df: dict[str, int], freq_cap: int = 2000, k_tokens: int = 2,
                         top_k_per_query: int = 50) -> pl.DataFrame:
-    """Pass B on a chunk of S2/S3 records: S1s sharing the house number + a rare street token. (cand_id, s1_id, score)."""
+    """Pass B on a chunk of S2/S3 records: S1s sharing any address number + a rare street token.
+    (cand_id, s1_id, score)."""
     pairs = []
-    for row in query_records.select("entity_id", "house_num", "addr_street", "addr_norm").iter_rows(named=True):
+    for row in query_records.select("entity_id", "addr_nums", "addr_street", "addr_norm").iter_rows(named=True):
         keys = _street_keys(row, idf, country_df, freq_cap, k_tokens)
         pairs += [(row["entity_id"], s1, sc) for s1, sc in _top_scores(index, keys, top_k_per_query)]
     return _pairs_frame(pairs)

@@ -83,7 +83,7 @@ def rank_scores(pairs: pl.DataFrame, records: pl.DataFrame) -> pl.Series:
 
 RANK_BY, RANK_DESC = ["rank_score", "block_score", "s1_id", "cand_id"], [True, True, False, False]
 RECORD_COLS = ["entity_id", "source", "country", "name_skeleton", "name_script", "name_core",
-               "house_num", "addr_street", "addr_norm"]
+               "house_num", "addr_nums", "addr_street", "addr_norm"]
 EMPTY_CANDIDATES = {"s1_id": pl.String, "cand_id": pl.String, "block_mask": pl.Int32, "block_score": pl.Float64,
                     "rank_score": pl.Float64, "country": pl.String, "rank_in_cand": pl.Int32}
 

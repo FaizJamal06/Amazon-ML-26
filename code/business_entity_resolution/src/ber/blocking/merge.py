@@ -102,7 +102,7 @@ def _merge_passes(pass_results: list[tuple[pl.LazyFrame, int]]) -> pl.LazyFrame:
     ])
     return merged.group_by("s1_id", "cand_id").agg(
         block_mask=pl.col("bit_val").bitwise_or(),
-        block_score=pl.col("score").sum(),
+        block_score=pl.col("score").sum().round(9),   # round: group_by sum order varies -> last-bit noise flips ties
     )
 
 

@@ -132,7 +132,7 @@ def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
         if row["name_skeleton"]:
             skel_tokens = row["name_skeleton"].split()
             skel_rare = _get_rarest_tokens(skel_tokens, skel_idf, k_tokens, freq_cap, skel_df)
-            rare = list(set(rare + skel_rare))
+            rare = list(dict.fromkeys(rare + skel_rare))  # ordered dedup: set order varies per process
 
         for token in rare:
             if token not in s1_index:
@@ -156,7 +156,7 @@ def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
             if row["name_script"] != "Latin" and row["name_skeleton"]:
                 skel_tokens = row["name_skeleton"].split()
                 skel_rare = _get_rarest_tokens(skel_tokens, skel_idf, k_tokens, freq_cap, skel_df)
-                rare = list(set(rare + skel_rare))
+                rare = list(dict.fromkeys(rare + skel_rare))  # ordered dedup: set order varies per process
 
             # Accumulate scores per S1
             s1_scores: dict[str, float] = {}

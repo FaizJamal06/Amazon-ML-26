@@ -30,8 +30,13 @@ OWNER_STAGES: dict[str, tuple[str, str, str]] = {
     "train": ("ber.model.lgbm", "train_oof", "Nitish (R3)"),               # -> scores_train.parquet (OOF)
     "predict": ("ber.model.lgbm", "predict", "Nitish (R3)"),               # -> scores_test.parquet
 }
-CHAIN = {"train": ["ingest", "normalize", "block", "folds", "featurize", "train", "decide"],
-         "test": ["ingest", "normalize", "block", "featurize", "predict", "decide", "submit"]}
+CHAIN = {  # (split, scorer) -> stages run by ``all``
+    ("train", "lgbm"): ["ingest", "normalize", "block", "folds", "featurize", "train", "decide"],
+    ("test", "lgbm"): ["ingest", "normalize", "block", "featurize", "predict", "decide", "submit"],
+    ("train", "fallback"): ["ingest", "normalize", "block", "folds", "fallback-train", "decide"],
+    ("test", "fallback"): ["ingest", "normalize", "block", "fallback-predict", "decide", "submit"],
+}
+SCORES_BY_SCORER = {"lgbm": "scores", "fallback": "scores_fallback"}
 
 
 def peak_memory_mb() -> float:
@@ -259,10 +264,13 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--subworld", action="store_true", help="run on the closed sub-world (cfg.subworld_frac)")
     ap.add_argument("--config", help="override yaml merged on top of configs/base.yaml")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="dotted override, repeatable")
+    ap.add_argument("--scorer", choices=list(SCORES_BY_SCORER),
+                    help="lgbm (scores) or fallback (scores_fallback): picks the 'all' chain and decide.scores_name")
     args = ap.parse_args(argv)
-    cfg = load_config(args.config, args.set)
+    sets = ([f"decide.scores_name={SCORES_BY_SCORER[args.scorer]}"] if args.scorer else []) + args.set  # --set wins
+    cfg = load_config(args.config, sets)
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
-    for stage in CHAIN[args.split] if args.stage == "all" else [args.stage]:
+    for stage in CHAIN[args.split, args.scorer or "lgbm"] if args.stage == "all" else [args.stage]:
         run(stage, cfg, args.split, args.subworld)
 
 

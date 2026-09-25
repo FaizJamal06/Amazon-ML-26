@@ -79,7 +79,7 @@ Always read and write through `cfg.artifact(name, split, subworld)`.
 
 | Person | Current task | Blocked on | Next handoff |
 |---|---|---|---|
-| Faiz | R1 merged. Now: fallback scorer, errors.py, decide v2 (branch r1/decide-v2) | real candidates_train for blocking report + sub-world | subworld_train → Nitish, ≤30 min after candidates land |
+| Faiz | r1/decide-v2 ready for PR (stub-tested): fallback scorer → `scores_fallback`, `errors` report, decide v2 (ef05 exact/approx) + `compare-decide` | real candidates_train (19:00) for blocking report + sub-world; scores_train (21:00) for decide tuning | folds_train + subworld_train → Nitish ≤30 min after candidates; Submission 1 at 23:30 (fallback scorer if LightGBM is late) |
 | Dhanishkaa | normalization + blocking v1 | source parquet from Chris (16:30) | records_train + candidates_train by 19:00 |
 | Nitish | features v1 + LightGBM on stub | subworld_train from Faiz (~19:30) | OOF scores_train by 21:00 |
 | Chris | AWS setup + ingest | — | source{1,2,3}_{train,test} + gt_train by 16:30; full test run by 22:30 |

@@ -2,8 +2,12 @@
 seed: 42
 n_folds: 5
 subworld_frac: 0.1       # fraction of S1 entities in a closed sub-world (fast loop, CLAUDE.md §6)
-max_cands: 50            # cap on candidates per S1 after merging blocking passes
+max_cands: 10            # cap on candidates per S1 after merging blocking passes
 decision_margin: 0.0     # extra conservatism in set selection; tuned with LB feedback (test is denser)
+
+blocking:
+  k_per_query: 2         # per S2/S3 record, keep its top-k S1s (rank_in_cand <= k)
+  min_score: null        # drop pairs with block_score (sum of per-pass normalized scores, 0-3) below this; null/0 = off
 
 decide:
   method: threshold      # threshold | ef05_exact | ef05_approx (v2 only after it wins on real full-world OOF)

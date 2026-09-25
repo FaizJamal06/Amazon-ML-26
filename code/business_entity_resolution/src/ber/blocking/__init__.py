@@ -5,3 +5,6 @@ In: records_{split}.parquet. Out: candidates_{split}.parquet (= candidate_pairs.
 
 Owner: Dhanishkaa (R2 Normalize / Blocking)
 """
+from ber.blocking.merge import PASS_NAMES, build_candidates
+
+__all__ = ["build_candidates", "PASS_NAMES"]

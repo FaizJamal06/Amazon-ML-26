@@ -74,28 +74,35 @@ def _merge_passes(pass_results: list[tuple[pl.DataFrame, int]]) -> pl.DataFrame:
 
 
 def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 4,
-                    max_cands: int = 15) -> pl.DataFrame:
+                    max_cands: int = 15, min_score: float = 0.0) -> pl.DataFrame:
     """Cap candidates: per S2/S3 keep top k S1s, then per S1 cap at max_cands by block_score.
 
     Args:
         candidates: DataFrame with (s1_id, cand_id, block_mask, block_score).
         k_per_query: per S2/S3 record, keep at most this many S1 candidates.
         max_cands: per S1, cap total candidates at this number.
+        min_score: floor value for block_score.
 
     Returns:
         Capped DataFrame with added rank_in_cand column.
     """
+    # Floor by min_score
+    if min_score > 0:
+        candidates = candidates.filter(pl.col("block_score") >= min_score)
+
+    # Add rank_in_cand: rank of this S1 among all S1s retrieved for this cand_id (1 = best)
+    # MUST be computed on the full retrieval list BEFORE capping!
+    capped = candidates.with_columns(
+        rank_in_cand=pl.col("block_score")
+        .rank("ordinal", descending=True)
+        .over("cand_id")
+        .cast(pl.Int32)
+    )
+
     # Per cand_id (S2/S3): keep top k S1s by block_score
     capped = (
-        candidates
-        .with_columns(
-            rank_for_cand=pl.col("block_score")
-            .rank("ordinal", descending=True)
-            .over("cand_id")
-            .cast(pl.Int32)
-        )
-        .filter(pl.col("rank_for_cand") <= k_per_query)
-        .drop("rank_for_cand")
+        capped
+        .filter(pl.col("rank_in_cand") <= k_per_query)
     )
 
     # Per S1: cap at max_cands by block_score
@@ -111,19 +118,11 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 4,
         .drop("rank_for_s1")
     )
 
-    # Add rank_in_cand: rank of this S1 among all S1s retrieved for this cand_id (1 = best)
-    capped = capped.with_columns(
-        rank_in_cand=pl.col("block_score")
-        .rank("ordinal", descending=True)
-        .over("cand_id")
-        .cast(pl.Int32)
-    )
-
     return capped
 
 
 def build_candidates(cfg: Config, split: str, subworld: bool = False,
-                     k_per_query: int = 4, max_cands: int | None = None) -> None:
+                     k_per_query: int | None = None, max_cands: int | None = None) -> None:
     """Build candidates_{split}.parquet from records_{split}.parquet.
 
     Runs blocking passes (name tokens + address keys + house numbers) per country,
@@ -154,6 +153,11 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
         name_idf = compute_token_idf(country_recs, "name_tokens", country)
         name_df = compute_df_counts(country_recs, "name_tokens", country)
 
+        # Compute IDF for skeleton tokens
+        print(f"    computing skeleton token IDF...")
+        skel_idf = compute_token_idf(country_recs, "name_skeleton", country)
+        skel_df = compute_df_counts(country_recs, "name_skeleton", country)
+
         # Compute IDF for address tokens on addr_norm (so all street & area tokens have accurate IDF)
         print(f"    computing addr token IDF...")
         addr_idf = compute_token_idf(country_recs, "addr_norm", country)
@@ -168,7 +172,7 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
 
         # Pass A: name token blocking
         print(f"    Pass A: name token blocking...")
-        name_pairs = name_token_pass(s1_recs, query_recs, name_idf, name_df, country,
+        name_pairs = name_token_pass(s1_recs, query_recs, name_idf, name_df, skel_idf, skel_df, country,
                                      freq_cap=2000, k_tokens=3)
         print(f"      {name_pairs.height:,} pairs from name tokens")
         pass_results.append((name_pairs, PASS_NAME_TOKEN))
@@ -208,9 +212,12 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
 
     # Cap candidates: keep top k_per_query per query, cap at max_cands per S1
     if max_cands is None:
-        max_cands = min(getattr(cfg, "max_cands", 15), 15)
-    print(f"  capping: k_per_query={k_per_query}, max_cands={max_cands}")
-    candidates = _cap_candidates(candidates, k_per_query=k_per_query, max_cands=max_cands)
+        max_cands = getattr(cfg, "max_cands", 15)
+    if k_per_query is None:
+        k_per_query = getattr(cfg, "k_per_query", 3)
+    min_score = getattr(cfg, "blocking_min_score", getattr(cfg.blocking, "min_score", 0.0)) if hasattr(cfg, "blocking") else 0.0
+    print(f"  capping: k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}")
+    candidates = _cap_candidates(candidates, k_per_query=k_per_query, max_cands=max_cands, min_score=min_score)
     print(f"  after capping: {candidates.height:,} pairs, "
           f"{candidates['s1_id'].n_unique():,} S1s")
 

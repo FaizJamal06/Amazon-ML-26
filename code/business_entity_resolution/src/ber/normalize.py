@@ -65,7 +65,7 @@ def detect_script(text: str) -> str:
     if not counts:
         return "Latin"
     # If any non-Latin script is present, pick the most common one
-    non_latin = {k: v for k, v in counts.items() if k != "Latin" and k != "Other"}
+    non_latin = {k: v for k, v in counts.items() if k != "Latin"}
     if non_latin:
         return max(non_latin, key=non_latin.get)  # type: ignore[arg-type]
     return "Latin"
@@ -200,8 +200,8 @@ def _extract_legal_form(name_tokens: list[str], legal_table: dict[str, str]) -> 
             canonical = legal_table[form]
             start = m.start()
             end = m.end()
-            # Prefer matches closer to the end (suffix position)
-            if best_form == "" or end >= best_end:
+            # Prefer matches closer to the end (suffix position), and longest match on tie
+            if best_form == "" or end > best_end or (end == best_end and start < best_start):
                 best_form = canonical
                 best_start = start
                 best_end = end
@@ -240,7 +240,10 @@ def normalize_name(raw_name: str, country: str) -> dict[str, str | list[str]]:
         tokens = tokens[1:]
 
     # Expand abbreviations
-    name_abbrev_table = rules.name_abbrevs(country)
+    name_abbrev_table = {
+        _normalize_base(form): canonical
+        for form, canonical in rules.name_abbrevs(country).items()
+    }
     tokens = _expand_tokens(tokens, name_abbrev_table)
 
     name_norm = " ".join(tokens)
@@ -278,12 +281,12 @@ _ADDR_NUM_RE = re.compile(
 )
 
 # Leading number pattern (address starts with a number)
-_LEADING_NUM_RE = re.compile(r"^(\d[\d/\-]*[a-zA-Z]?)\b")
+_LEADING_NUM_RE = re.compile(r"^(\d[\d/\-]*(?:\s*(?:bis|ter)\b|[a-zA-Z]?))\b")
 
 # House-number prefix pattern (explicit marker + number)
 _HOUSE_PREFIX_RE = re.compile(
     r"\b(?:h no|hno|no|n|door no|d no|plot no|shop no|plot|door|flat|shop|bldg|building)\s*"
-    r"(\d[\d/\-]*[a-zA-Z]?)\b",
+    r"(\d[\d/\-]*(?:\s*(?:bis|ter)\b|[a-zA-Z]?))\b",
     re.IGNORECASE,
 )
 
@@ -299,8 +302,10 @@ def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
     """
     # Find all numbers in the address
     all_nums: list[str] = []
-    for m in re.finditer(r"\d[\d/\-]*[a-zA-Z]?", addr_norm):
+    # Match numbers, optionally followed by space and bis/ter, or just trailing letters
+    for m in re.finditer(r"\d[\d/\-]*(?:\s*(?:bis|ter)\b|[a-zA-Z]?)?", addr_norm):
         num = m.group().lstrip("0") or "0"
+        num = re.sub(r"\s+", "", num)
         all_nums.append(num)
 
     non_house = rules.non_house_markers(country)
@@ -310,6 +315,7 @@ def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
     house_start = -1
     for m in _HOUSE_PREFIX_RE.finditer(addr_norm):
         num = m.group(1).lstrip("0") or "0"
+        num = re.sub(r"\s+", "", num)
         house_num = num
         house_start = m.start()
         break
@@ -319,6 +325,7 @@ def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
         m = _LEADING_NUM_RE.match(addr_norm)
         if m:
             num = m.group(1).lstrip("0") or "0"
+            num = re.sub(r"\s+", "", num)
             house_num = num
             house_start = m.start()
 
@@ -348,7 +355,10 @@ def normalize_address(raw_addr: str, country: str) -> dict[str, str | list[str]]
     norm = _normalize_base(raw_addr)
 
     # Expand address abbreviations
-    addr_table = rules.addr_abbrevs(country)
+    addr_table = {
+        _normalize_base(form): canonical
+        for form, canonical in rules.addr_abbrevs(country).items()
+    }
     tokens = norm.split()
     tokens = _expand_tokens(tokens, addr_table)
     addr_norm = " ".join(tokens)
@@ -537,48 +547,81 @@ def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
     # Process in chunks for memory efficiency
     chunk_size = 100_000
     n_chunks = math.ceil(raw.height / chunk_size)
-    processed_chunks = []
+    
+    tmp_dir = cfg.data_dir / "cache" / "tmp_normalize"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    chunk_files = []
 
     for i in range(n_chunks):
         start = i * chunk_size
         end = min((i + 1) * chunk_size, raw.height)
         chunk = raw.slice(start, end - start)
         processed = _process_chunk(chunk)
-        processed_chunks.append(processed)
+        
+        chunk_path = tmp_dir / f"chunk_{i}.parquet"
+        processed.write_parquet(chunk_path)
+        chunk_files.append(chunk_path)
+        
         if (i + 1) % 10 == 0 or i == n_chunks - 1:
             print(f"  normalized {end:,} / {raw.height:,} records")
 
-    records = pl.concat(processed_chunks)
+    del raw  # Free raw dataframe memory
 
-    # Compute area tokens from the data itself (per country)
+    # Compute area tokens from the data itself (per country) using lazy scan
     print("  computing area tokens (data-driven)...")
-    area_tokens = compute_area_tokens(records, threshold_frac=0.15)
+    lazy_records = pl.scan_parquet(tmp_dir / "chunk_*.parquet")
+    addr_df = lazy_records.select(["entity_id", "country", "addr_norm"]).collect()
+    area_tokens = compute_area_tokens(addr_df, threshold_frac=0.15)
+    del addr_df
+    
     for country, tokens in area_tokens.items():
         if tokens:
             print(f"    {country}: {len(tokens)} area tokens (top 10: {sorted(tokens)[:10]})")
 
-    # Remove area tokens from addr_street
+    # Remove area tokens from addr_street and count French bis/ter
     def _remove_area(addr_street: str, country: str) -> str:
-        """Remove area tokens for a specific country."""
         area_set = area_tokens.get(country, set())
         if not area_set:
             return addr_street
         return remove_area_tokens(addr_street, area_set)
 
-    # Apply area token removal row-by-row (polars struct + map)
-    addr_street_cleaned = []
-    for row in records.select("addr_street", "country").iter_rows():
-        addr_street_cleaned.append(_remove_area(row[0], row[1]))
-    records = records.with_columns(pl.Series("addr_street", addr_street_cleaned))
+    bis_ter_count = 0
+    for chunk_path in chunk_files:
+        df = pl.read_parquet(chunk_path)
+        addr_street_cleaned = []
+        for row in df.select("addr_street", "country").iter_rows():
+            addr_street_cleaned.append(_remove_area(row[0], row[1]))
+        df = df.with_columns(pl.Series("addr_street", addr_street_cleaned))
+        
+        bis_ter_chunk = df.filter(
+            (pl.col("country") == "France") &
+            (pl.col("addr_norm").str.contains(r"\b(bis|ter)\b"))
+        ).height
+        bis_ter_count += bis_ter_chunk
+        
+        # Overwrite chunk with cleaned addr_street
+        df.write_parquet(chunk_path)
 
-    # Show examples
-    _show_examples(records, area_tokens)
+    if bis_ter_count > 0:
+        print(f"  French records with bis/ter: {bis_ter_count:,}")
 
-    # Write output
+    # Write output efficiently by sinking merged chunks
     out_path = cfg.artifact("records", split, subworld)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    records.write_parquet(out_path)
-    print(f"  wrote {records.height:,} records to {out_path}")
+    pl.scan_parquet(tmp_dir / "chunk_*.parquet").sink_parquet(out_path)
+    
+    # Get total count
+    total_records = pl.scan_parquet(out_path).select(pl.len()).collect().item()
+    print(f"  wrote {total_records:,} records to {out_path}")
+
+    # Show examples
+    example_records = []
+    countries = pl.scan_parquet(out_path).select("country").unique().collect()["country"].to_list()
+    for country in countries:
+        country_recs = pl.scan_parquet(out_path).filter(pl.col("country") == country).head(10).collect()
+        example_records.append(country_recs)
+    
+    _show_examples(pl.concat(example_records), area_tokens)
 
 
 def _show_examples(records: pl.DataFrame, area_tokens: dict[str, set[str]]) -> None:

@@ -36,5 +36,31 @@ class TestNormalize(unittest.TestCase):
         norm = _normalize_base("12/3 MG Road, Shop 45-A")
         self.assertEqual(norm, "12/3 mg road shop 45-a")
 
+    def test_french_bis_ter(self):
+        # Fix 6: Handle French bis/ter suffixes
+        # Test: "10 bis rue de la paix"
+        norm = _normalize_base("10 bis rue de la paix")
+        house_num, addr_nums = _extract_house_num(norm, "France")
+        self.assertEqual(house_num, "10bis")
+        self.assertIn("10bis", addr_nums)
+
+        # Test: "15 ter avenue"
+        norm = _normalize_base("15 ter avenue")
+        house_num, addr_nums = _extract_house_num(norm, "France")
+        self.assertEqual(house_num, "15ter")
+        self.assertIn("15ter", addr_nums)
+
+    def test_longest_legal_form(self):
+        from ber.normalize import normalize_name
+        # Fix 2 & 3: longest match for legal forms and normalized rule-table keys
+        name_fields = normalize_name("XYZ PRIVATE LIMITED", "India")
+        self.assertEqual(name_fields["legal_form"], "private limited")
+        self.assertEqual(name_fields["name_core"], "xyz")
+
+    def test_unknown_script(self):
+        # Fix 4: Classify unknown scripts as non-Latin (Other)
+        from ber.normalize import detect_script
+        self.assertEqual(detect_script("テスト"), "Other")
+
 if __name__ == '__main__':
     unittest.main()

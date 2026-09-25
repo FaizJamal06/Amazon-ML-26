@@ -144,7 +144,7 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
         s1_recs = country_recs.filter(pl.col("source") == 1)
         query_recs = country_recs.filter(pl.col("source") > 1)
 
-        print(f"\n  ── {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 ──")
+        print(f"\n  -- {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 --")
 
         if s1_recs.height == 0 or query_recs.height == 0:
             continue

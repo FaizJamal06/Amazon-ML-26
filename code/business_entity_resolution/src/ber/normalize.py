@@ -88,7 +88,7 @@ def transliterate(text: str) -> str:
 
 
 # Regex: numbers with possible internal slashes/dashes (e.g. 12/3, 45-a, 6800)
-_NUM_INSIDE_RE = re.compile(r"\d[\d/\-a-zA-Z]*\d|\d+")
+_NUM_INSIDE_RE = re.compile(r"\d+-[a-zA-Z]\b|\d[\d/\-a-zA-Z]*\d|\d+")
 
 # Strip punctuation EXCEPT inside numbers like 12/3
 _PUNCT_RE = re.compile(r"[^\w\s]")
@@ -114,7 +114,8 @@ def _normalize_base(text: str) -> str:
     text = fold_accents(text).lower()
     # Protect numbers with internal punctuation (12/3, 45-a)
     protected: dict[str, str] = {}
-    for i, m in enumerate(_NUM_INSIDE_RE.finditer(text)):
+    matches = list(_NUM_INSIDE_RE.finditer(text))
+    for i, m in reversed(list(enumerate(matches))):
         placeholder = f" __NUM{i}__ "
         protected[placeholder.strip()] = m.group()
         text = text[:m.start()] + placeholder + text[m.end():]
@@ -245,7 +246,7 @@ def normalize_name(raw_name: str, country: str) -> dict[str, str | list[str]]:
     name_norm = " ".join(tokens)
 
     # Extract legal form
-legal_table = {
+    legal_table = {
         _normalize_base(form): canonical
         for form, canonical in rules.legal_forms(country).items()
     }
@@ -271,7 +272,7 @@ legal_table = {
 
 # Regex to find numbers in addresses, including forms like 12/3, 45-a, #23, 00174
 _ADDR_NUM_RE = re.compile(
-    r"(?:(?:no\.?|n°|nº|#|h\.?no\.?|plot|door|flat|shop|bldg\.?|building)\s*)?"
+    r"(?:(?:h no|hno|no|n|door no|d no|plot no|shop no|plot|door|flat|shop|bldg|building)\s*)?"
     r"(\d[\d/\-]*[a-zA-Z]?)",
     re.IGNORECASE,
 )
@@ -281,7 +282,7 @@ _LEADING_NUM_RE = re.compile(r"^(\d[\d/\-]*[a-zA-Z]?)\b")
 
 # House-number prefix pattern (explicit marker + number)
 _HOUSE_PREFIX_RE = re.compile(
-    r"\b(?:plot|no\.?|n°|nº|#|h\.?no\.?|door|flat|shop|bldg\.?|building)\s*"
+    r"\b(?:h no|hno|no|n|door no|d no|plot no|shop no|plot|door|flat|shop|bldg|building)\s*"
     r"(\d[\d/\-]*[a-zA-Z]?)\b",
     re.IGNORECASE,
 )
@@ -306,11 +307,11 @@ def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
 
     # Strategy 1: Look for explicit house-number prefix markers
     house_num = ""
+    house_start = -1
     for m in _HOUSE_PREFIX_RE.finditer(addr_norm):
         num = m.group(1).lstrip("0") or "0"
-        # Check that the marker is actually a house-number marker, not a non-house marker
-        prefix_text = addr_norm[:m.start()].lower().split()
         house_num = num
+        house_start = m.start()
         break
 
     # Strategy 2: Leading number (address starts with a number)
@@ -318,18 +319,14 @@ def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
         m = _LEADING_NUM_RE.match(addr_norm)
         if m:
             num = m.group(1).lstrip("0") or "0"
-            # Check that the number is not preceded by a non-house marker
             house_num = num
+            house_start = m.start()
 
     # Validate: if the "house number" is actually preceded by a non-house marker, clear it
-    if house_num:
-        # Find the position of this number in the original text and check preceding token
-        lower = addr_norm.lower()
-        idx = lower.find(house_num.lower())
-        if idx > 0:
-            before = lower[:idx].strip().split()
-            if before and before[-1] in non_house:
-                house_num = ""
+    if house_num and house_start > 0:
+        before = addr_norm[:house_start].strip().split()
+        if before and before[-1].lower() in non_house:
+            house_num = ""
 
     return house_num, all_nums
 

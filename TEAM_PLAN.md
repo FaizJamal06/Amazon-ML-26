@@ -10,8 +10,8 @@ Team: **Faiz, Dhanishkaa, Nitish, Chris.** R2–R4 are a first assignment — sw
 | Role | Owner | Owns (modules) | Hands over |
 |---|---|---|---|
 | **R1 Lead / Eval / Decision** | Faiz | repo skeleton, `config.py`, `io.py`, `eval/*` (folds, sub-world sampler, metric, reports, errors), `decide/*` (one-to-one, expected-F0.5 selection), `pipeline.py`, submissions, final package + documentation | folds + sub-worlds + scorer everyone uses; final TSVs |
-| **R2 Normalize / Blocking** | Dhanishkaa | `normalize.py` (incl. **script detection + transliteration**, house-number extraction), `rules/*` (incl. **France rules**), `blocking/*` | `records_*.parquet`, `candidates_*.parquet` + recall report (per country / script / pass) |
-| **R3 Features / LightGBM** | Nitish | `features/*` (**decoy-killers first**: house-number relation + token-set difference; then pairwise, rarity, context, graph), `model/lgbm.py` (5-fold OOF), calibration, cross-country validation | `features_*.parquet`, `scores_*.parquet` (OOF on train), feature importance |
+| **R2 Normalize / Blocking** | Dhanishkaa | `normalize.py` (incl. **script detection + transliteration**, house-number extraction), `rules/*` (incl. **France rules**), `blocking/*` | `records`, `candidates` artifacts (train + test) + recall report (per country / script / pass) |
+| **R3 Features / LightGBM** | Nitish | `features/*` (**decoy-killers first**: house-number relation + token-set difference; then pairwise, rarity, context, graph), `model/lgbm.py` (5-fold OOF), calibration, cross-country validation | `features`, `scores` artifacts (OOF on train), feature importance |
 | **R4 Deep models / AWS** | Chris | SageMaker/EC2 setup, `blocking/embed_knn.py` (for R2), `model/cross_encoder/*`, full-scale test runs on the high-RAM box, synthetic France pairs (optional) | e5 kNN candidates; out-of-fold cross-encoder score column; full test inference |
 
 Everyone: log every run in `notes/EXPERIMENTS.md`; do error analysis on your own stage.
@@ -26,6 +26,43 @@ R4 e5 kNN ─────────┘ (extra blocking pass)   └── R4 cr
 ```
 
 Unblock trick for Day 1: R3 and R1 start on **stub data** (a tiny hand-made parquet that follows the contracts) so no one waits.
+
+## Dependencies & handoffs
+
+Artifact names are the `cfg.artifact()` names from CLAUDE.md §4 (e.g. `candidates_train` = `cfg.artifact('candidates', 'train')`).
+
+| Producer → Consumer | Artifact | Needed by (IST) | Until then |
+|---|---|---|---|
+| Faiz → all | merged `main`: config + `artifact()`, stub data script, contracts, metric, folds | ✅ done 15:30 | — |
+| Chris → Dhanishkaa, Faiz, Nitish | `source{1,2,3}_{train,test}`, `gt_train` parquet | 16:30 | work on stub data / a 100k-row slice |
+| Dhanishkaa → Faiz | `records_train`, `candidates_train` (+`rank_in_cand`, `block_score`) | 19:00 | Faiz builds decide v2 + errors.py on stub |
+| Faiz → Nitish | `folds_train`, `subworld_train` (+ blocking report) | 19:30 (≤30 min after candidates) | Nitish develops features on stub |
+| Nitish → Faiz | `scores_train` (OOF, calibrated) + saved model + calibrator | 21:00 | Faiz tunes decide on stub |
+| Dhanishkaa + Nitish → Chris | code merged to main for full TEST run | 21:30 | Chris dry-runs the pipeline on the test sub-sample |
+| Chris → Faiz | `records/candidates/features/scores_test` | 22:30 | — |
+| Faiz → leaderboard | Submission 1 (validator PASS) | 23:30 | — |
+| Chris → Dhanishkaa (Day 2) | e5 kNN candidates pass | Sat 13:00 | TF-IDF passes |
+| Chris → Nitish (Day 3) | OOF cross-encoder score column | Sun 15:00 | LightGBM without it |
+
+**Shared-file rules**
+- `ber/io.py` has two sections: `ingest` (Chris) and the writer (Faiz). Edit only your own section.
+- `pipeline.py` belongs to Faiz; others expose functions with the documented signature, and Faiz wires them in.
+- `CLAUDE.md` §4 changes need a PR and a ping to the downstream owner.
+
+**Handoff protocol.** When an artifact is ready, the producer posts in the team chat:
+- artifact name + split;
+- row count;
+- config hash + commit;
+- location (S3 path / Drive link);
+- runtime + peak RAM.
+
+The producer's code must also be on `main` (merged PR) before anyone depends on it for the TEST run.
+
+**Fallbacks** (decided at the 19:00 sync, not at 22:00):
+- AWS not ready by 19:00 → the full runs move to the laptop with the most RAM.
+- Candidates late past 19:30 → Nitish trains on a 100k-S1 world that Dhanishkaa blocks locally.
+- LightGBM not ready by 22:00 → Submission 1 uses Faiz's rule-based fallback scorer (block_score + house_num
+  relation + name similarity, threshold tuned on the train sub-world).
 
 ## Timeline (IST)
 

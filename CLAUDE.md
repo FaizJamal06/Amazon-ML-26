@@ -124,23 +124,36 @@ docs/   MODELS.md  Documentation_template.md (filled at the end)
 
 ### Data contracts (parquet, stable column names — change only via PR that updates this section)
 
-- `records_{split}.parquet`: `entity_id, source (1|2|3), country, name_raw, addr_raw, name_script` (dominant Unicode
+**Artifact naming (mandatory):** every parquet in the cache is read and written ONLY through
+`cfg.artifact(name, split, subworld=False)` → `cache/{name}_{split}[_sw].parquet`. Never hand-build a path.
+Names in use:
+- `source1|source2|source3` (ingest output, all columns Utf8 + `source`)
+- `gt` (ingest output via `ber.eval.metric.gt_long`)
+- `records`, `candidates`, `folds`, `subworld`, `features`, `scores`, `matches`
+
+Example: `cfg.artifact('candidates', 'train')` = `cache/candidates_train.parquet`.
+
+Contracts per artifact name (`split ∈ {train, test}` unless marked train-only):
+- `source1` / `source2` / `source3`: the raw TSV columns `entity_id, business_name, business_address, country`, all Utf8,
+  plus `source` (1|2|3).
+- `gt` (train only): `s1_id, match_id` — long ground truth, one row per matched pair (S1s without matches have no row;
+  the S1 universe comes from `records`). Built by `ber.eval.metric.gt_long` from the raw GT at ingest.
+- `records`: `entity_id, source (1|2|3), country, name_raw, addr_raw, name_script` (dominant Unicode
   script of the raw name), `name_norm` (transliterated, accent-folded, lowercased, abbreviations expanded), `name_core`
   (legal form removed), `legal_form` (canonical or ""), `addr_norm, addr_street` (addr_norm minus house number and
   region/city tokens), `house_num` (primary number as string, "" if none), `addr_nums (list[str])`, `name_tokens (list[str])`
-- `candidates_{split}.parquet`: `s1_id, cand_id, country, block_mask (int bitmask of passes), tfidf_name, tfidf_full, knn_rank,
+- `candidates`: `s1_id, cand_id, country, block_mask (int bitmask of passes), tfidf_name, tfidf_full, knn_rank,
   rank_in_cand` (rank of this S1 among the S1s retrieved for this candidate, 1 = best), `block_score` (best pass score)
-- `features_{split}.parquet`: `s1_id, cand_id, <feature columns>, label (train/val only)`
-- `scores_{split}.parquet`: `s1_id, cand_id, p` (calibrated)
-- `matches_{split}.parquet`: `s1_id, cand_id, p` — decision-layer output (after one-to-one + selection); input of `submit`
-- `folds_train.parquet`: `s1_id, fold (0–4), country, n_matches`
-- `gt_train.parquet`: `s1_id, match_id` — long ground truth, one row per matched pair (S1s without matches have no row;
-  the S1 universe comes from `records_train.parquet`). Built by `ber.eval.metric.gt_long` from the raw GT at ingest.
-- `subworld_train.parquet`: `entity_id, source, role` (`s1` | `match` | `decoy`) — the closed sub-world (§6);
-  `--subworld` stages read `*_train_sw.parquet` artifacts restricted to these ids.
-- Stub versions of `records_*`, `candidates_*`, `gt_train` live in `cache/stub/` (`scripts/make_stub_data.py`).
-- `split ∈ {train, test}`; train artifacts carry the fold via a join on `s1_id`. `--subworld F` restricts to a closed
-  sub-world of fraction F (§6) for fast loops.
+- `folds` (train only): `s1_id, fold (0–4), country, n_matches`
+- `subworld` (train only): `entity_id, source, role` (`s1` | `match` | `decoy`) — the closed sub-world (§6). The
+  `subworld` stage also writes `records`, `gt` and `candidates` with `subworld=True` (`*_train_sw.parquet`), restricted
+  to these ids; `--subworld` stages read and write only `_sw` artifacts.
+- `features`: `s1_id, cand_id, <feature columns>, label (train only)`
+- `scores`: `s1_id, cand_id, p` (calibrated; OOF on train)
+- `matches`: `s1_id, cand_id, p` — decision-layer output (after one-to-one + selection); input of `submit`
+- Train artifacts carry the fold via a join on `s1_id`. `--subworld` uses `subworld_frac` from the config (default 0.1).
+- Stub versions of `records`, `candidates`, `gt` (train) live in `cache/stub/` (`scripts/make_stub_data.py`); run any stage
+  on them with `--set paths.cache_dir=cache/stub`.
 
 ## 5. What makes us better than the default pipeline (implement these, in this priority)
 

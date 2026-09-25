@@ -118,40 +118,46 @@ def _top_scores(index: Index, keys: list, top_k: int) -> list[tuple[str, float]]
 
 
 def _name_keys(row: dict, idf: dict[str, float], country_df: dict[str, int], skel_idf: dict[str, float],
-               skel_df: dict[str, int], freq_cap: int, k_tokens: int, always_skeleton: bool) -> list[str]:
-    """Rarest name tokens of a record (+ rarest skeleton tokens: always for S1, only non-Latin for queries)."""
-    rare = _get_rarest_tokens(row["name_tokens"] or [], idf, k_tokens, freq_cap, country_df)
+               skel_df: dict[str, int], freq_cap: int, k_tokens: int, always_skeleton: bool,
+               legal_skel: frozenset[str]) -> list[str]:
+    """Rarest name_core tokens of a record (legal form removed) + rarest skeleton tokens that are not the skeleton of
+    a legal-form word (always for S1, only non-Latin for queries), so 'limited' / 'private' / 'llc' and their
+    transliterations ('limiteda' -> 'lmtd') never take the slots."""
+    rare = _get_rarest_tokens((row["name_core"] or "").split(), idf, k_tokens, freq_cap, country_df)
     if row["name_skeleton"] and (always_skeleton or row["name_script"] != "Latin"):
-        skel_rare = _get_rarest_tokens(row["name_skeleton"].split(), skel_idf, k_tokens, freq_cap, skel_df)
+        skel_tokens = [t for t in row["name_skeleton"].split() if t not in legal_skel]
+        skel_rare = _get_rarest_tokens(skel_tokens, skel_idf, k_tokens, freq_cap, skel_df)
         rare = list(dict.fromkeys(rare + skel_rare))  # ordered dedup: set order varies per process
     return rare
 
 
 def build_name_index(s1_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
-                     skel_idf: dict[str, float], skel_df: dict[str, int], freq_cap: int = 2000,
-                     k_tokens: int = 3) -> Index:
-    """Pass A index, built once per country: rare name token (or skeleton token) -> [(s1_id, idf)].
+                     skel_idf: dict[str, float], skel_df: dict[str, int], legal_skel: frozenset[str] = frozenset(),
+                     freq_cap: int = 2000, k_tokens: int = 3) -> Index:
+    """Pass A index, built once per country: rare name_core token (or skeleton token) -> [(s1_id, idf)].
 
     Skeleton tokens are always indexed for S1: the skeleton is the shared representation between Latin S1 names
     and transliterated non-Latin S2/S3 names.
     """
     index: Index = {}
-    for row in s1_records.select("entity_id", "name_tokens", "name_skeleton", "name_script").iter_rows(named=True):
-        for token in _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=True):
+    for row in s1_records.select("entity_id", "name_core", "name_skeleton", "name_script").iter_rows(named=True):
+        for token in _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=True,
+                                legal_skel=legal_skel):
             index.setdefault(token, []).append((row["entity_id"], idf.get(token, skel_idf.get(token, 10.0))))
     return index
 
 
 def query_name_index(index: Index, query_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
-                     skel_idf: dict[str, float], skel_df: dict[str, int], freq_cap: int = 2000, k_tokens: int = 3,
-                     top_k_per_query: int = 50) -> pl.DataFrame:
+                     skel_idf: dict[str, float], skel_df: dict[str, int], legal_skel: frozenset[str] = frozenset(),
+                     freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 50) -> pl.DataFrame:
     """Pass A on a chunk of S2/S3 records: each record retrieves its top S1s by the summed IDF of shared rare tokens.
 
     Direction S2/S3 -> S1, within one country. Returns (cand_id, s1_id, score).
     """
     pairs = []
-    for row in query_records.select("entity_id", "name_tokens", "name_skeleton", "name_script").iter_rows(named=True):
-        keys = _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=False)
+    for row in query_records.select("entity_id", "name_core", "name_skeleton", "name_script").iter_rows(named=True):
+        keys = _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=False,
+                          legal_skel=legal_skel)
         pairs += [(row["entity_id"], s1, sc) for s1, sc in _top_scores(index, keys, top_k_per_query)]
     return _pairs_frame(pairs)
 

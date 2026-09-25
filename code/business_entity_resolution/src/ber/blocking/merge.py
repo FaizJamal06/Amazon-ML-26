@@ -29,8 +29,10 @@ from ber.blocking.keys import (
     query_house_index,
     query_name_index,
 )
+from ber import rules
 from ber.config import Config
 from ber.features.pairwise import cpdist
+from ber.normalize import _normalize_base, name_skeleton
 
 # Pass bit assignments (bitmask)
 PASS_NAME_TOKEN = 0    # bit 0 (1 << 0 = 1)
@@ -80,7 +82,7 @@ def rank_scores(pairs: pl.DataFrame, records: pl.DataFrame) -> pl.Series:
 
 
 RANK_BY, RANK_DESC = ["rank_score", "block_score", "s1_id", "cand_id"], [True, True, False, False]
-RECORD_COLS = ["entity_id", "source", "country", "name_tokens", "name_skeleton", "name_script", "name_core",
+RECORD_COLS = ["entity_id", "source", "country", "name_skeleton", "name_script", "name_core",
                "house_num", "addr_street", "addr_norm"]
 EMPTY_CANDIDATES = {"s1_id": pl.String, "cand_id": pl.String, "block_mask": pl.Int32, "block_score": pl.Float64,
                     "rank_score": pl.Float64, "country": pl.String, "rank_in_cand": pl.Int32}
@@ -155,13 +157,14 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
     print(f"\n  -- {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 --")
     if s1_recs.height == 0 or query_recs.height == 0:
         return []
-    name_idf, name_df = compute_token_idf(recs, "name_tokens", country), compute_df_counts(recs, "name_tokens", country)
+    name_idf, name_df = compute_token_idf(recs, "name_core", country), compute_df_counts(recs, "name_core", country)
     skel_idf = compute_token_idf(recs, "name_skeleton", country)
     skel_df = compute_df_counts(recs, "name_skeleton", country)
     addr_idf, addr_df = compute_token_idf(recs, "addr_norm", country), compute_df_counts(recs, "addr_norm", country)
     house_idf, house_df = compute_token_idf(recs, "house_num", country), compute_df_counts(recs, "house_num", country)
     t = time.time()
-    name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df)
+    legal_skel = frozenset(t for form in rules.legal_forms(country) for t in name_skeleton(_normalize_base(form)).split())
+    name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel)
     addr_index = build_address_index(s1_recs, addr_idf, addr_df)
     house_index = build_house_index(s1_recs, house_idf, house_df)
     print(f"    indexes built in {time.time() - t:.1f}s")
@@ -170,7 +173,8 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
     for i, lo in enumerate(range(0, query_recs.height, chunk_rows)):  # chunks of records, not rows
         part = query_recs.slice(lo, chunk_rows)
         raw = pl.concat([
-            query_name_index(name_index, part, name_idf, name_df, skel_idf, skel_df).with_columns(bit=PASS_NAME_TOKEN),
+            query_name_index(name_index, part, name_idf, name_df, skel_idf, skel_df, legal_skel)
+            .with_columns(bit=PASS_NAME_TOKEN),
             query_address_index(addr_index, part, addr_idf, addr_df).with_columns(bit=PASS_ADDR_KEY),
             query_house_index(house_index, part, house_df).with_columns(bit=PASS_HOUSE_NUM),
         ]).with_columns(pl.col("bit").cast(pl.Int8))

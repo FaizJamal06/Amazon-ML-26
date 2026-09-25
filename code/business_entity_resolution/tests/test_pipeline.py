@@ -1,4 +1,5 @@
 """Tests for ber.pipeline wiring (no data needed). Run directly or with pytest."""
+import importlib
 import sys
 from pathlib import Path
 
@@ -9,18 +10,24 @@ from ber.pipeline import CHAIN, OWNER_STAGES, R1_STAGES, peak_memory_mb, resolve
 
 
 def test_every_stage_resolves_and_placeholders_name_the_owner():
-    """All CLI stages resolve; missing owner functions raise NotImplementedError mentioning the owner."""
+    """All CLI stages resolve; missing owner functions raise NotImplementedError mentioning the owner.
+
+    Only placeholders are called: an implemented stage would process whatever is in the real cache (this test once
+    started a full-train normalize after ingest had written cache/source*_train.parquet).
+    """
     cfg = load_config()
     for stage in [*OWNER_STAGES, *R1_STAGES]:
         fn = resolve(stage)
         assert callable(fn), stage
-    module, func, owner = OWNER_STAGES["normalize"]
-    try:
-        resolve("normalize")(cfg, "train", False)
-    except NotImplementedError as e:
-        assert owner in str(e) and func in str(e)
-    else:  # owner has implemented it: fine, nothing to check
-        pass
+    for stage, (module, func, owner) in OWNER_STAGES.items():
+        if getattr(importlib.import_module(module), func, None) is not None:
+            continue  # implemented: never run it here
+        try:
+            resolve(stage)(cfg, "train", False)
+        except NotImplementedError as e:
+            assert owner in str(e) and func in str(e)
+        else:
+            raise AssertionError(f"placeholder for {stage} did not raise")
 
 
 def test_chains_only_use_known_stages():

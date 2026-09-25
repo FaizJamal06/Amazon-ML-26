@@ -11,11 +11,15 @@ Owner: Dhanishkaa (R2 Normalize / Blocking)
 """
 from __future__ import annotations
 
-import math
+import functools
+import multiprocessing as mp
+import os
 import re
 import shutil
+import time
 import unicodedata
 from collections import Counter
+from pathlib import Path
 from typing import Sequence
 
 import polars as pl
@@ -89,7 +93,9 @@ def transliterate(text: str) -> str:
 
 
 # Regex: numbers with possible internal slashes/dashes (e.g. 12/3, 45-a, 6800)
-_NUM_INSIDE_RE = re.compile(r"\d+-[a-zA-Z]\b|\d[\d/\-a-zA-Z]*\d|\d+")
+# Ordinals (1st/2nd/3rd/12th) are kept whole: split as "3 rd", the "rd" was expanded to "road" ("3rd cross" ->
+# "3 road cross") and the ordinal became a fake leading house number.
+_NUM_INSIDE_RE = re.compile(r"\d+(?:st|nd|rd|th)\b|\d+-[a-zA-Z]\b|\d[\d/\-a-zA-Z]*\d|\d+", re.IGNORECASE)
 
 # Strip punctuation EXCEPT inside numbers like 12/3
 _PUNCT_RE = re.compile(r"[^\w\s]")
@@ -177,6 +183,23 @@ def name_skeleton(name_norm: str) -> str:
 # §4  NAME NORMALIZATION (legal form extraction, abbreviation expansion)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@functools.lru_cache(maxsize=None)
+def _norm_table(kind: str, country: str) -> dict[str, str]:
+    """``{_normalize_base(form): canonical}`` for ``rules.<kind>(country)``, built once per (kind, country).
+
+    The rule tables depend only on the country; rebuilding them for every record was ~100 _normalize_base calls
+    per record. Callers must not mutate the returned dict.
+    """
+    return {_normalize_base(form): canonical for form, canonical in getattr(rules, kind)(country).items()}
+
+
+@functools.lru_cache(maxsize=64)
+def _legal_patterns(items: tuple[tuple[str, str], ...]) -> list[tuple[re.Pattern, str]]:
+    """(word-boundary pattern, canonical) per legal form, longest form first (stable), compiled once per table."""
+    ordered = sorted(items, key=lambda kv: len(kv[0]), reverse=True)
+    return [(re.compile(r"(?:^|\s)" + re.escape(form) + r"(?:\s|$)"), canonical) for form, canonical in ordered]
+
+
 def _expand_tokens(tokens: list[str], table: dict[str, str]) -> list[str]:
     """Expand abbreviations in a list of tokens using the given table."""
     return [table.get(t, t) for t in tokens]
@@ -192,13 +215,10 @@ def _extract_legal_form(name_tokens: list[str], legal_table: dict[str, str]) -> 
     best_form = ""
     best_start = -1
     best_end = -1
-    # Sort by length descending to match the longest form first
-    for form in sorted(legal_table, key=len, reverse=True):
-        # Use word boundary matching
-        pattern = re.compile(r"(?:^|\s)" + re.escape(form) + r"(?:\s|$)")
+    # Longest form first, word-boundary patterns (compiled once per table)
+    for pattern, canonical in _legal_patterns(tuple(legal_table.items())):
         m = pattern.search(text)
         if m:
-            canonical = legal_table[form]
             start = m.start()
             end = m.end()
             # Prefer matches closer to the end (suffix position), and longest match on tie
@@ -241,19 +261,13 @@ def normalize_name(raw_name: str, country: str) -> dict[str, str | list[str]]:
         tokens = tokens[1:]
 
     # Expand abbreviations
-    name_abbrev_table = {
-        _normalize_base(form): canonical
-        for form, canonical in rules.name_abbrevs(country).items()
-    }
+    name_abbrev_table = _norm_table("name_abbrevs", country)
     tokens = _expand_tokens(tokens, name_abbrev_table)
 
     name_norm = " ".join(tokens)
 
     # Extract legal form
-    legal_table = {
-        _normalize_base(form): canonical
-        for form, canonical in rules.legal_forms(country).items()
-    }
+    legal_table = _norm_table("legal_forms", country)
     core_tokens, legal_form = _extract_legal_form(tokens, legal_table)
     name_core = " ".join(core_tokens)
 
@@ -290,6 +304,11 @@ _HOUSE_PREFIX_RE = re.compile(
     r"(\d[\d/\-]*(?:\s*(?:bis|ter)\b|[a-zA-Z]?))\b",
     re.IGNORECASE,
 )
+
+
+_NUM_TOKEN_RE = re.compile(r"\d[\d/\-]*[a-z]?")          # a standalone number token (fullmatch)
+_ORDINAL_RE = re.compile(r"\d+(?:st|nd|rd|th)")          # 1st, 2nd, 3rd, 12th (fullmatch)
+_FALLBACK_NON_HOUSE = {"sector", "block", "phase", "ward", "stage", "lane", "apt", "apartment", "suite", "ste", "unit"}
 
 
 def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
@@ -336,6 +355,19 @@ def _extract_house_num(addr_norm: str, country: str) -> tuple[str, list[str]]:
         if before and before[-1].lower() in non_house:
             house_num = ""
 
+    # Strategy 3 (only when no marker and no leading number): first standalone number token anywhere, e.g.
+    # "tn mt juliet 2005 carphilly court" (component order rotated) -> "2005"; skips numbers after a non-house marker,
+    # ordinals and numbers followed by cross/main.
+    if house_start == -1:
+        tokens = addr_norm.split()
+        for i, tok in enumerate(tokens):
+            if (not _NUM_TOKEN_RE.fullmatch(tok) or _ORDINAL_RE.fullmatch(tok)
+                    or (i > 0 and tokens[i - 1] in _FALLBACK_NON_HOUSE)
+                    or (i + 1 < len(tokens) and tokens[i + 1] in ("cross", "main"))):
+                continue
+            house_num = tok.lstrip("0") or "0"
+            break
+
     return house_num, all_nums
 
 
@@ -356,10 +388,7 @@ def normalize_address(raw_addr: str, country: str) -> dict[str, str | list[str]]
     norm = _normalize_base(raw_addr)
 
     # Expand address abbreviations
-    addr_table = {
-        _normalize_base(form): canonical
-        for form, canonical in rules.addr_abbrevs(country).items()
-    }
+    addr_table = _norm_table("addr_abbrevs", country)
     tokens = norm.split()
     tokens = _expand_tokens(tokens, addr_table)
     addr_norm = " ".join(tokens)
@@ -508,6 +537,38 @@ def _process_chunk(chunk: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(result_rows, schema=schema)
 
 
+def _normalize_chunk_file(src_path: str, start: int, length: int, out_path: str) -> int:
+    """Worker (top-level, spawn-safe): normalize rows [start, start+length) of one source parquet -> ``out_path``.
+
+    Returns the number of records written.
+    """
+    raw = pl.scan_parquet(src_path).slice(start, length).collect()
+    raw = raw.rename({k: v for k, v in {"business_name": "name_raw", "business_address": "addr_raw"}.items()
+                      if k in raw.columns})
+    if "source" in raw.columns:
+        raw = raw.with_columns(pl.col("source").cast(pl.Int8))
+    _process_chunk(raw).write_parquet(out_path)
+    return raw.height
+
+
+def remove_area_tokens_expr(area_tokens: dict[str, set[str]]) -> pl.Expr:
+    """Vectorized ``remove_area_tokens`` over the ``addr_street`` column, per ``country``.
+
+    Same result as the row version: countries without area tokens keep addr_street unchanged; otherwise the
+    whitespace tokens not in the country's area set are joined with single spaces, and if none remain the original
+    addr_street is kept.
+    """
+    out = pl.col("addr_street")
+    for country, area in area_tokens.items():  # countries, not rows
+        if not area:
+            continue
+        kept = pl.col("addr_street").str.extract_all(r"\S+").list.eval(
+            pl.element().filter(~pl.element().is_in(sorted(area))))
+        cleaned = pl.when(kept.list.len() >= 1).then(kept.list.join(" ")).otherwise(pl.col("addr_street"))
+        out = pl.when(pl.col("country") == country).then(cleaned).otherwise(out)
+    return out
+
+
 def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
     """Build records_{split}.parquet from source1/2/3 parquet files.
 
@@ -532,88 +593,51 @@ def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
         print(f"  warning: no source parquets found for split={split}, skipping")
         return
 
-    chunk_size = 100_000
     tmp_dir = cfg.cache_dir / f"tmp_normalize_{split}{'_sw' if subworld else ''}"
     shutil.rmtree(tmp_dir, ignore_errors=True)  # stale chunks from an earlier run would be globbed into the output
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    chunk_files = []
-    
-    chunk_idx = 0
-    total_recs = 0
 
+    # One task per slice of each source parquet (<= 100k rows, and >= ~4 tasks per worker so small inputs still use
+    # every core); each worker reads its slice and writes its own chunk file. Output does not depend on the slicing.
+    workers = int(cfg.get("normalize.workers", 0)) or max(1, (os.cpu_count() or 2) - 1)
+    n_rows = {p: pl.scan_parquet(p).select(pl.len()).collect().item() for p in paths}
+    chunk_size = max(5_000, min(100_000, -(-sum(n_rows.values()) // (4 * workers))))
+    tasks = []
     for path in paths:
-        raw = pl.read_parquet(path)
-        
-        # Rename columns to match our internal contract
-        col_map = {"business_name": "name_raw", "business_address": "addr_raw"}
-        for old, new in col_map.items():
-            if old in raw.columns:
-                raw = raw.rename({old: new})
-
-        # Ensure source is Int8
-        if "source" in raw.columns:
-            raw = raw.with_columns(pl.col("source").cast(pl.Int8))
-
-        # Process in chunks
-        n_chunks = math.ceil(raw.height / chunk_size)
-        for i in range(n_chunks):
-            start = i * chunk_size
-            end = min((i + 1) * chunk_size, raw.height)
-            chunk = raw.slice(start, end - start)
-            processed = _process_chunk(chunk)
-            
-            chunk_path = tmp_dir / f"chunk_{chunk_idx}.parquet"
-            processed.write_parquet(chunk_path)
-            chunk_files.append(chunk_path)
-            
-            chunk_idx += 1
-            total_recs += chunk.height
-            
-        del raw  # Free raw dataframe memory
-
-    print(f"  normalized {total_recs:,} records across {len(paths)} sources")
+        for start in range(0, n_rows[path], chunk_size):
+            tasks.append((str(path), start, chunk_size, str(tmp_dir / f"chunk_{len(tasks):05d}.parquet")))
+    workers = min(workers, len(tasks))
+    t0 = time.time()
+    if workers <= 1:
+        counts = [_normalize_chunk_file(*t) for t in tasks]
+    else:
+        # spawn: safe on Windows and avoids fork + polars thread pools; workers import this module afresh
+        with mp.get_context("spawn").Pool(workers) as pool:
+            counts = pool.starmap(_normalize_chunk_file, tasks)
+    chunk_files = [Path(t[3]) for t in tasks]
+    print(f"  normalized {sum(counts):,} records across {len(paths)} sources "
+          f"({len(tasks)} chunks, {workers} worker(s), {time.time() - t0:.1f}s)")
 
     # Compute area tokens from the data itself (per country) using lazy scan
     print("  computing area tokens (data-driven)...")
-    lazy_records = pl.scan_parquet(tmp_dir / "chunk_*.parquet")
+    lazy_records = pl.scan_parquet(chunk_files)
     area_tokens = compute_area_tokens(lazy_records, threshold_frac=0.15)
-    
+
     for country, tokens in area_tokens.items():
         if tokens:
             print(f"    {country}: {len(tokens)} area tokens (top 10: {sorted(tokens)[:10]})")
 
-    # Remove area tokens from addr_street and count French bis/ter
-    def _remove_area(addr_street: str, country: str) -> str:
-        area_set = area_tokens.get(country, set())
-        if not area_set:
-            return addr_street
-        return remove_area_tokens(addr_street, area_set)
-
-    bis_ter_count = 0
-    for chunk_path in chunk_files:
-        df = pl.read_parquet(chunk_path)
-        addr_street_cleaned = []
-        for row in df.select("addr_street", "country").iter_rows():
-            addr_street_cleaned.append(_remove_area(row[0], row[1]))
-        df = df.with_columns(pl.Series("addr_street", addr_street_cleaned))
-        
-        bis_ter_chunk = df.filter(
-            (pl.col("country") == "France") &
-            (pl.col("addr_norm").str.contains(r"\b(bis|ter)\b"))
-        ).height
-        bis_ter_count += bis_ter_chunk
-        
-        # Overwrite chunk with cleaned addr_street
-        df.write_parquet(chunk_path)
-
+    bis_ter_count = lazy_records.filter(
+        (pl.col("country") == "France") & (pl.col("addr_norm").str.contains(r"\b(bis|ter)\b"))
+    ).select(pl.len()).collect().item()
     if bis_ter_count > 0:
         print(f"  French records with bis/ter: {bis_ter_count:,}")
 
-    # Write output efficiently by sinking merged chunks
+    # Remove area tokens from addr_street (vectorized) while sinking the chunks into the output
     out_path = cfg.artifact("records", split, subworld)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    pl.scan_parquet(tmp_dir / "chunk_*.parquet").sink_parquet(out_path)
-    
+    lazy_records.with_columns(addr_street=remove_area_tokens_expr(area_tokens)).sink_parquet(out_path)
+
     # Get total count
     total_records = pl.scan_parquet(out_path).select(pl.len()).collect().item()
     shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -1,13 +1,15 @@
 """Early real-data smoke test of normalize + block on a small closed world built from the train TSVs.
 
 Usage (from the repo root):  python code/business_entity_resolution/scripts/smoke_real_blocking.py [--n-s1 20000] [--rebuild]
+                             [--skip-normalize] [--n-missed 20]
 
 World: --n-s1 S1s sampled per country (seed 42) + all their GT matches + unmatched S2/S3 records (matched to no S1 in
 the full GT) sampled per country so that (S2+S3)/S1 equals the full train ratio of that country. Written as
 source{1,2,3}_train + gt_train into cache/smoke/ (git-ignored); every stage runs with --set paths.cache_dir=cache/smoke.
 Then: normalize once; block + blocking-report for each blocking.k_per_query in KS; one uncapped block run (to tell
-"retrieved but capped out" from "no pass retrieved it"). Prints per-country / per-script recall, all-matches-found
-share, candidates per S1, runtime + peak RAM, and 15 missed GT pairs. Full text -> reports/smoke_real_blocking.md.
+"retrieved but ranked out" from "no pass retrieved it"). Prints per-country / per-script recall, all-matches-found
+share, candidates per S1, runtime + peak RAM, the count of each miss category and --n-missed example misses.
+--skip-normalize reuses the cached records (for blocking-only changes). Full text -> reports/smoke_real_blocking.md.
 
 Caveat: randomly sampled unmatched records are easier than the real decoys (near-copies of specific S1s), so recall
 here is meaningful but candidate counts are optimistic.
@@ -103,24 +105,28 @@ def metrics(cand: pl.DataFrame, gt: pl.DataFrame, groups: pl.DataFrame) -> pl.Da
 
 def missed_pairs(cand: pl.DataFrame, uncapped: pl.DataFrame, gt: pl.DataFrame, rec: pl.DataFrame,
                  n: int, seed: int) -> str:
-    """``n`` random GT pairs missing from ``cand``: raw strings of both sides + what the passes did for the candidate."""
+    """Count of all GT pairs missing from ``cand`` per category ("no pass retrieved it" vs "retrieved but ranked out")
+    + ``n`` random examples: raw strings of both sides + what the passes did for the candidate."""
     miss = gt.join(cand.select("s1_id", match_id="cand_id"), on=["s1_id", "match_id"], how="anti")
+    n_out = miss.join(uncapped.select("s1_id", match_id="cand_id"), on=["s1_id", "match_id"], how="semi").height
+    head = (f"All {miss.height:,} misses: {miss.height - n_out:,} no pass retrieved it, {n_out:,} retrieved but "
+            f"ranked out (per-record k or per-S1 cap).")
     miss = miss.sample(min(n, miss.height), seed=seed)
     raw = rec.select("entity_id", "country", "name_raw", "addr_raw", "name_script", "house_num")
     passes = lambda m: "+".join(v for b, v in PASS_NAMES.items() if m >> b & 1) or "-"  # noqa: E731
     lines = []
-    for s1_id, cid in miss.iter_rows():  # 15 pairs, not rows
+    for s1_id, cid in miss.iter_rows():  # n example pairs, not rows
         a, b = (raw.filter(pl.col("entity_id") == x).row(0, named=True) for x in (s1_id, cid))
         hit = uncapped.filter((pl.col("s1_id") == s1_id) & (pl.col("cand_id") == cid))
         others = uncapped.filter(pl.col("cand_id") == cid)
-        why = (f"retrieved by {passes(hit['block_mask'][0])}, rank_in_cand {hit['rank_in_cand'][0]} -> capped out"
+        why = (f"retrieved by {passes(hit['block_mask'][0])}, rank_in_cand {hit['rank_in_cand'][0]} -> ranked out"
                if hit.height else
                f"not retrieved; this record got {others.height} other S1s via "
                f"{passes(int(others.select(pl.col('block_mask').bitwise_or()).item())) if others.height else 'no pass'}")
         lines.append(f"- [{a['country']}] S1 `{a['name_raw']}` | `{a['addr_raw']}` (hn {a['house_num'] or '-'})\n"
                      f"  cand ({b['name_script']}) `{b['name_raw']}` | `{b['addr_raw']}` (hn {b['house_num'] or '-'})\n"
                      f"  -> {why}")
-    return "\n".join(lines)
+    return "\n".join([head, *lines])
 
 
 def main() -> None:
@@ -128,13 +134,17 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--n-s1", type=int, default=20_000, help="S1s sampled per country (default 20000)")
     ap.add_argument("--rebuild", action="store_true", help="rebuild the world even if the smoke sources exist")
+    ap.add_argument("--skip-normalize", action="store_true", help="reuse cached records_train (blocking-only change)")
+    ap.add_argument("--n-missed", type=int, default=20, help="example missed pairs to print (default 20)")
     args = ap.parse_args()
     cfg = load_config(sets=["paths.cache_dir=cache/smoke"])
     if args.rebuild or not cfg.artifact("source1", "train").exists():
         build_world(cfg, args.n_s1, cfg.seed)
     out = [f"# Smoke: real-data blocking, {args.n_s1:,} S1/country\n", CAVEAT, ""]
-    _, t, mb = stage("normalize")
-    runs = [("normalize", "-", t, mb)]
+    runs = []
+    if not (args.skip_normalize and cfg.artifact("records", "train").exists()):
+        _, t, mb = stage("normalize")
+        runs.append(("normalize", "-", t, mb))
     rec, gt = pl.read_parquet(cfg.artifact("records", "train")), pl.read_parquet(cfg.artifact("gt", "train"))
     groups = s1_groups(rec, gt)
     _, t, mb = stage("block", *UNCAPPED)
@@ -153,7 +163,8 @@ def main() -> None:
                    tbl_hide_dataframe_shape=True, tbl_hide_column_data_types=True):
         text = [f"## Sweep (max_cands={cfg.max_cands})", str(sweep), "", "## Runtime / peak RAM",
                 str(pl.DataFrame(runs, schema=["stage", "run", "seconds", "peak_MB"], orient="row")), "",
-                "## 15 missed GT pairs at k=2 (default)", missed_pairs(cands[2], uncapped, gt, rec, 15, cfg.seed)]
+                f"## Missed GT pairs at k=2 (default), {args.n_missed} examples",
+                missed_pairs(cands[2], uncapped, gt, rec, args.n_missed, cfg.seed)]
     print("\n".join([CAVEAT, "", *text]))
     path = cfg.path("reports_dir") / "smoke_real_blocking.md"
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -17,12 +17,16 @@ MATCHES = pl.DataFrame({"s1_id": ["S1-1", "S1-1"], "match_id": ["S3-1", "S2-1"]}
 
 
 def _run(matches, cands, tmp):
-    """Write into ``tmp`` against a fake test dir holding a test_source1.tsv with ``S1``."""
+    """Write into ``tmp`` against a fake test dir (test_source1 with ``S1``, test_source2/3 with ``VALID``)."""
     test_dir = Path(tmp) / "test"
     test_dir.mkdir(exist_ok=True)
     (test_dir / "test_source1.tsv").write_text(
         "entity_id\tbusiness_name\tbusiness_address\tcountry\n" + "".join(f"{s}\tx\ty\tZZ\n" for s in S1),
         encoding="utf-8")
+    for src, ids in (("2", VALID.filter(VALID.str.starts_with("S2-"))), ("3", VALID.filter(VALID.str.starts_with("S3-")))):
+        (test_dir / f"test_source{src}.tsv").write_text(
+            "entity_id\tbusiness_name\tbusiness_address\tcountry\n" + "".join(f"{i}\tx\ty\tZZ\n" for i in ids),
+            encoding="utf-8")
     return write_submission(matches, cands, S1, VALID, Path(tmp) / "output",
                             load_config().path("validator"), test_dir)
 

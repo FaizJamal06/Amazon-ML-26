@@ -83,12 +83,14 @@ def _write_tsv(df: pl.DataFrame, path: Path, header: tuple[str, str]) -> str:
 
 
 def run_validator(validator: Path, matching: Path, candidate: Path, test_dir: Path) -> str:
-    """Run the official ``validate_submission.py``; raise ``SubmissionError`` unless it exits 0 and prints PASS."""
+    """Run the official ``validate_submission.py`` with ``--check-ids``; raise ``SubmissionError`` unless it exits 0,
+    prints PASS and actually ran the id-existence check (it silently skips it when test_source2/3.tsv are missing).
+    ``--check-ids`` loads all test S2/S3 ids (a few GB of RAM on the full test set)."""
     res = subprocess.run([sys.executable, str(validator), "--matching", str(matching), "--candidate", str(candidate),
-                          "--test-dir", str(test_dir)], capture_output=True, text=True, encoding="utf-8",
+                          "--test-dir", str(test_dir), "--check-ids"], capture_output=True, text=True, encoding="utf-8",
                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})  # validator prints non-ASCII
-    if res.returncode != 0 or "PASS" not in res.stdout:
-        raise SubmissionError(f"official validator did not PASS (exit {res.returncode}):\n{res.stdout}\n{res.stderr}")
+    if res.returncode != 0 or "PASS" not in res.stdout or "valid S2/S3 match IDs" not in res.stdout:
+        raise SubmissionError(f"official validator did not PASS with --check-ids (exit {res.returncode}):\n{res.stdout}\n{res.stderr}")
     return res.stdout
 
 

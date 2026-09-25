@@ -81,7 +81,7 @@ Always read and write through `cfg.artifact(name, split, subworld)`.
 |---|---|---|---|
 | Faiz | r1/decide-v2 ready for PR (stub-tested): fallback scorer → `scores_fallback`, `errors` report, decide v2 (ef05 exact/approx) + `compare-decide` | real candidates_train (19:00) for blocking report + sub-world; scores_train (21:00) for decide tuning | folds_train + subworld_train → Nitish ≤30 min after candidates; Submission 1 at 23:30 (fallback scorer if LightGBM is late) |
 | Dhanishkaa | normalization + blocking v1 | source parquet from Chris (16:30) | records_train + candidates_train by 19:00 |
-| Nitish | features v1 + LightGBM on stub | subworld_train from Faiz (~19:30) | OOF scores_train by 21:00 |
+| Faiz (covering Nitish tonight) | R3 on `r3/features-lgbm`: features v1 (decoy-killers, pairwise, context, rarity) + LightGBM 5-fold OOF + isotonic, stub-tested end to end (validator PASS); handoff in `notes/HANDOFF_R3.md` | real `candidates_train` / `records_train` from Dhanishkaa | `scores_train` (OOF) within ~1 h of candidates; Nitish takes the branch back Sat 26 Sep |
 | Chris | AWS setup + ingest | — | source{1,2,3}_{train,test} + gt_train by 16:30; full test run by 22:30 |
 
 Each person updates their row at every sync (13:00 / 19:00 / 23:00) and when a handoff lands.

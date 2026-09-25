@@ -128,7 +128,8 @@ docs/   MODELS.md  Documentation_template.md (filled at the end)
   script of the raw name), `name_norm` (transliterated, accent-folded, lowercased, abbreviations expanded), `name_core`
   (legal form removed), `legal_form` (canonical or ""), `addr_norm, addr_street` (addr_norm minus house number and
   region/city tokens), `house_num` (primary number as string, "" if none), `addr_nums (list[str])`, `name_tokens (list[str])`
-- `candidates_{split}.parquet`: `s1_id, cand_id, country, block_mask (int bitmask of passes), tfidf_name, tfidf_full, knn_rank`
+- `candidates_{split}.parquet`: `s1_id, cand_id, country, block_mask (int bitmask of passes), tfidf_name, tfidf_full, knn_rank,
+  rank_in_cand` (rank of this S1 among the S1s retrieved for this candidate, 1 = best), `block_score` (best pass score)
 - `features_{split}.parquet`: `s1_id, cand_id, <feature columns>, label (train/val only)`
 - `scores_{split}.parquet`: `s1_id, cand_id, p` (calibrated)
 - `folds_train.parquet`: `s1_id, fold (0–4), country, n_matches`
@@ -163,7 +164,10 @@ docs/   MODELS.md  Documentation_template.md (filled at the end)
    (tokens that are very frequent within the country) so "Gironde" vs "Nouvelle-Aquitaine" is not read as a conflict.
    (d) Optional: synthetic French positives by applying the noise operators measured on train to test-S1 French records
    (inputs only, no labels, no external data — document it openly).
-6. **Blocking recall near the ceiling.** Multiple passes, all within country: TF-IDF char n-grams on name (transliterated),
+6. **Blocking recall near the ceiling.** Primary blocking direction is **S2/S3 → S1**: every S2/S3 record retrieves its
+   top-k S1s (k≈5–10) within its country, because each S2/S3 belongs to at most one S1. Invert to per-S1 lists and cap at
+   max_cands. The top-1 S1 of an unmatched record is its 'decoy owner' (used by the sub-world sampler).
+   Multiple passes, all within country: TF-IDF char n-grams on name (transliterated),
    TF-IDF on street + house number, sorted-token name key, house_num + first street token key, optional e5 kNN
    (multilingual, helps native-script names). No postcode pass. Report recall per country, per script, per pass;
    add a pass for each miss type found.

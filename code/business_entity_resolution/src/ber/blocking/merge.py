@@ -10,6 +10,8 @@ Owner: Dhanishkaa (R2 Normalize / Blocking)
 from __future__ import annotations
 
 import time
+import tempfile
+from pathlib import Path
 
 import polars as pl
 
@@ -34,20 +36,18 @@ PASS_NAMES: dict[int, str] = {
 }
 
 
-def _merge_passes(pass_results: list[tuple[pl.DataFrame, int]]) -> pl.DataFrame:
-    """Merge multiple blocking pass results into a single DataFrame with a bitmask.
+def _merge_passes(pass_results: list[tuple[pl.LazyFrame, int]]) -> pl.LazyFrame:
+    """Merge multiple blocking pass results into a single LazyFrame with a bitmask.
 
     Args:
-        pass_results: list of (pairs_df, bit_position) where pairs_df has (cand_id, s1_id, score).
+        pass_results: list of (lazy_pairs, bit_position) where lazy_pairs has (cand_id, s1_id, score).
 
     Returns:
-        DataFrame with (s1_id, cand_id, block_mask, block_score).
+        LazyFrame with (s1_id, cand_id, block_mask, block_score).
     """
     all_pairs = []
-    for pairs, bit in pass_results:
-        if pairs.height == 0:
-            continue
-        tagged = pairs.with_columns(
+    for lazy_pairs, bit in pass_results:
+        tagged = lazy_pairs.with_columns(
             bit_val=pl.lit(1 << bit, dtype=pl.Int32),
         )
         all_pairs.append(tagged)
@@ -56,7 +56,7 @@ def _merge_passes(pass_results: list[tuple[pl.DataFrame, int]]) -> pl.DataFrame:
         return pl.DataFrame(schema={
             "s1_id": pl.String, "cand_id": pl.String,
             "block_mask": pl.Int32, "block_score": pl.Float64,
-        })
+        }).lazy()
 
     merged = pl.concat(all_pairs)
 
@@ -168,34 +168,40 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
         house_idf = compute_token_idf(country_recs, "house_num", country)
         house_df = compute_df_counts(country_recs, "house_num", country)
 
-        pass_results = []
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            pass_results = []
 
-        # Pass A: name token blocking
-        print(f"    Pass A: name token blocking...")
-        name_pairs = name_token_pass(s1_recs, query_recs, name_idf, name_df, skel_idf, skel_df, country,
-                                     freq_cap=2000, k_tokens=3)
-        print(f"      {name_pairs.height:,} pairs from name tokens")
-        pass_results.append((name_pairs, PASS_NAME_TOKEN))
+            # Pass A: name token blocking
+            print(f"    Pass A: name token blocking...")
+            name_pairs, name_cnt = name_token_pass(s1_recs, query_recs, name_idf, name_df, skel_idf, skel_df, country, out_dir,
+                                         freq_cap=2000, k_tokens=3)
+            print(f"      {name_cnt:,} pairs from name tokens")
+            if name_cnt > 0:
+                pass_results.append((name_pairs, PASS_NAME_TOKEN))
 
-        # Pass B: address key blocking (house_num + rare street token)
-        print(f"    Pass B: address key blocking...")
-        addr_pairs = address_key_pass(s1_recs, query_recs, addr_idf, addr_df, country,
-                                      freq_cap=2000, k_tokens=2)
-        print(f"      {addr_pairs.height:,} pairs from address keys")
-        pass_results.append((addr_pairs, PASS_ADDR_KEY))
+            # Pass B: address key blocking (house_num + rare street token)
+            print(f"    Pass B: address key blocking...")
+            addr_pairs, addr_cnt = address_key_pass(s1_recs, query_recs, addr_idf, addr_df, country, out_dir,
+                                          freq_cap=2000, k_tokens=2)
+            print(f"      {addr_cnt:,} pairs from address keys")
+            if addr_cnt > 0:
+                pass_results.append((addr_pairs, PASS_ADDR_KEY))
 
-        # Pass C: house number blocking
-        print(f"    Pass C: house number blocking...")
-        house_pairs = house_num_pass(s1_recs, query_recs, house_idf, house_df, country,
-                                     freq_cap=50)
-        print(f"      {house_pairs.height:,} pairs from house numbers")
-        pass_results.append((house_pairs, PASS_HOUSE_NUM))
+            # Pass C: house number blocking
+            print(f"    Pass C: house number blocking...")
+            house_pairs, house_cnt = house_num_pass(s1_recs, query_recs, house_idf, house_df, country, out_dir,
+                                         freq_cap=50)
+            print(f"      {house_cnt:,} pairs from house numbers")
+            if house_cnt > 0:
+                pass_results.append((house_pairs, PASS_HOUSE_NUM))
 
-        # Merge passes
-        merged = _merge_passes(pass_results)
-        merged = merged.with_columns(country=pl.lit(country))
-        print(f"    merged: {merged.height:,} unique pairs, "
-              f"{merged['s1_id'].n_unique():,} S1s with candidates")
+            # Merge passes lazily then collect
+            merged_lazy = _merge_passes(pass_results)
+            merged_lazy = merged_lazy.with_columns(country=pl.lit(country))
+            merged = merged_lazy.collect()
+            print(f"    merged: {merged.height:,} unique pairs, "
+                  f"{merged['s1_id'].n_unique():,} S1s with candidates")
 
         all_candidates.append(merged)
         print(f"    {country} done in {time.time() - tc:.1f}s")

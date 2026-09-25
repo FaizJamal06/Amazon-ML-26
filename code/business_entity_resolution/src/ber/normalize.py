@@ -391,53 +391,55 @@ def normalize_address(raw_addr: str, country: str) -> dict[str, str | list[str]]
 # §6  AREA TOKEN REMOVAL (data-driven, not hardcoded city/state lists)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def compute_area_tokens(records: pl.DataFrame, threshold_frac: float = 0.15) -> dict[str, set[str]]:
+def compute_area_tokens(records: pl.LazyFrame | pl.DataFrame, threshold_frac: float = 0.15) -> dict[str, set[str]]:
     """Compute area tokens per country: tokens whose document frequency exceeds a threshold.
 
     These are typically city/state/region names that don't help street-level matching.
     Computed from the data itself — no hardcoded city/state/département list.
 
     Args:
-        records: DataFrame with 'country', 'addr_norm' columns.
+        records: LazyFrame or DataFrame with 'entity_id', 'country', 'addr_norm' columns.
         threshold_frac: fraction of records within a country where a token must appear
                         to be considered an "area token".
 
     Returns:
         dict mapping country → set of area tokens.
     """
+    if isinstance(records, pl.DataFrame):
+        records = records.lazy()
+
+    # Get total records per country
+    n_recs = records.group_by("country").len().collect()
+    n_recs_dict = dict(zip(n_recs["country"], n_recs["len"]))
+
+    # Explode address tokens and count document frequency
+    addr_tokens = (
+        records
+        .select("entity_id", "country", "addr_norm")
+        .filter(pl.col("addr_norm") != "")
+        .with_columns(pl.col("addr_norm").str.split(" ").alias("tokens"))
+        .explode("tokens")
+        .filter(pl.col("tokens").str.len_chars() > 1)
+        # Exclude numbers
+        .filter(~pl.col("tokens").str.contains(r"^\d"))
+    )
+
+    token_freq = (
+        addr_tokens
+        .group_by("country", "tokens")
+        .agg(doc_count=pl.col("entity_id").n_unique())
+        .collect()
+    )
+
     area_tokens: dict[str, set[str]] = {}
-
-    for country in records["country"].unique().to_list():
-        country_recs = records.filter(pl.col("country") == country)
-        n_recs = country_recs.height
-
-        # Explode address tokens and count document frequency
-        addr_tokens = (
-            country_recs
-            .select("entity_id", "addr_norm")
-            .filter(pl.col("addr_norm") != "")
-            .with_columns(
-                pl.col("addr_norm").str.split(" ").alias("tokens")
-            )
-            .explode("tokens")
-            .filter(pl.col("tokens").str.len_chars() > 1)
-            # Exclude numbers
-            .filter(~pl.col("tokens").str.contains(r"^\d"))
-        )
-
-        if addr_tokens.height == 0:
+    for country, total in n_recs_dict.items():
+        if total == 0:
             area_tokens[country] = set()
             continue
-
-        token_freq = (
-            addr_tokens
-            .group_by("tokens")
-            .agg(doc_count=pl.col("entity_id").n_unique())
-            .with_columns(frac=pl.col("doc_count") / n_recs)
-            .filter(pl.col("frac") > threshold_frac)
-        )
-
-        area_tokens[country] = set(token_freq["tokens"].to_list())
+        
+        country_tokens = token_freq.filter(pl.col("country") == country)
+        valid = country_tokens.filter((pl.col("doc_count") / total) > threshold_frac)
+        area_tokens[country] = set(valid["tokens"].to_list())
 
     return area_tokens
 
@@ -513,17 +515,15 @@ def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
     """
     print(f"[normalize] building records_{split}...")
 
-    # Read source parquets
-    frames = []
+    paths = []
     for src_num in (1, 2, 3):
         path = cfg.artifact(f"source{src_num}", split, subworld)
         if path.exists():
-            df = pl.read_parquet(path)
-            frames.append(df)
+            paths.append(path)
         else:
             print(f"  warning: {path} not found, skipping")
 
-    if not frames:
+    if not paths:
         out_path = cfg.artifact("records", split, subworld)
         if out_path.exists():
             print(f"  warning: no source parquets found, but {out_path} exists; keeping existing")
@@ -531,48 +531,50 @@ def build_records(cfg: Config, split: str, subworld: bool = False) -> None:
         print(f"  warning: no source parquets found for split={split}, skipping")
         return
 
-    raw = pl.concat(frames)
-    print(f"  {raw.height:,} raw records across {len(frames)} sources")
-
-    # Rename columns to match our internal contract
-    col_map = {"business_name": "name_raw", "business_address": "addr_raw"}
-    for old, new in col_map.items():
-        if old in raw.columns:
-            raw = raw.rename({old: new})
-
-    # Ensure source is Int8
-    if "source" in raw.columns:
-        raw = raw.with_columns(pl.col("source").cast(pl.Int8))
-
-    # Process in chunks for memory efficiency
     chunk_size = 100_000
-    n_chunks = math.ceil(raw.height / chunk_size)
-    
     tmp_dir = cfg.data_dir / "cache" / "tmp_normalize"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     chunk_files = []
+    
+    chunk_idx = 0
+    total_recs = 0
 
-    for i in range(n_chunks):
-        start = i * chunk_size
-        end = min((i + 1) * chunk_size, raw.height)
-        chunk = raw.slice(start, end - start)
-        processed = _process_chunk(chunk)
+    for path in paths:
+        raw = pl.read_parquet(path)
         
-        chunk_path = tmp_dir / f"chunk_{i}.parquet"
-        processed.write_parquet(chunk_path)
-        chunk_files.append(chunk_path)
-        
-        if (i + 1) % 10 == 0 or i == n_chunks - 1:
-            print(f"  normalized {end:,} / {raw.height:,} records")
+        # Rename columns to match our internal contract
+        col_map = {"business_name": "name_raw", "business_address": "addr_raw"}
+        for old, new in col_map.items():
+            if old in raw.columns:
+                raw = raw.rename({old: new})
 
-    del raw  # Free raw dataframe memory
+        # Ensure source is Int8
+        if "source" in raw.columns:
+            raw = raw.with_columns(pl.col("source").cast(pl.Int8))
+
+        # Process in chunks
+        n_chunks = math.ceil(raw.height / chunk_size)
+        for i in range(n_chunks):
+            start = i * chunk_size
+            end = min((i + 1) * chunk_size, raw.height)
+            chunk = raw.slice(start, end - start)
+            processed = _process_chunk(chunk)
+            
+            chunk_path = tmp_dir / f"chunk_{chunk_idx}.parquet"
+            processed.write_parquet(chunk_path)
+            chunk_files.append(chunk_path)
+            
+            chunk_idx += 1
+            total_recs += chunk.height
+            
+        del raw  # Free raw dataframe memory
+
+    print(f"  normalized {total_recs:,} records across {len(paths)} sources")
 
     # Compute area tokens from the data itself (per country) using lazy scan
     print("  computing area tokens (data-driven)...")
     lazy_records = pl.scan_parquet(tmp_dir / "chunk_*.parquet")
-    addr_df = lazy_records.select(["entity_id", "country", "addr_norm"]).collect()
-    area_tokens = compute_area_tokens(addr_df, threshold_frac=0.15)
-    del addr_df
+    area_tokens = compute_area_tokens(lazy_records, threshold_frac=0.15)
     
     for country, tokens in area_tokens.items():
         if tokens:

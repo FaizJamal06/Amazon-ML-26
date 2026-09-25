@@ -8,6 +8,8 @@ Owner: Dhanishkaa (R2 Normalize / Blocking)
 from __future__ import annotations
 
 import math
+import tempfile
+from pathlib import Path
 from collections import Counter
 import heapq
 
@@ -97,7 +99,7 @@ def _get_rarest_tokens(tokens: list[str], idf: dict[str, float], k: int = 3,
 def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                     idf: dict[str, float], country_df: dict[str, int],
                     skel_idf: dict[str, float], skel_df: dict[str, int],
-                    country: str, freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 15) -> pl.DataFrame:
+                    country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 15) -> tuple[pl.LazyFrame, int]:
     """Pass A: name-token blocking. For each S2/S3 record, find S1s sharing rare name tokens.
 
     Direction: S2/S3 → S1 (each S2/S3 retrieves its top-k S1 candidates).
@@ -137,7 +139,8 @@ def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                 s1_index[token] = []
             s1_index[token].append((row["entity_id"], idf.get(token, skel_idf.get(token, 10.0))))
 
-    results = []
+    chunk_files = []
+    total_pairs = 0
     chunk_size = 50_000
     n_chunks = max(1, math.ceil(query_records.height / chunk_size))
 
@@ -168,12 +171,16 @@ def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                     pairs.append((row["entity_id"], s1_id, s1_scores[s1_id]))
 
         if pairs:
-            results.append(pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row"))
+            chunk_df = pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
+            total_pairs += chunk_df.height
+            chunk_path = out_dir / f"name_pass_{i}.parquet"
+            chunk_df.write_parquet(chunk_path)
+            chunk_files.append(chunk_path)
 
-    if not results:
-        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64})
+    if not chunk_files:
+        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64}).lazy(), 0
 
-    return pl.concat(results)
+    return pl.scan_parquet([str(p) for p in chunk_files]), total_pairs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -183,7 +190,7 @@ def name_token_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
 
 def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                      idf: dict[str, float], country_df: dict[str, int],
-                     country: str, freq_cap: int = 2000, k_tokens: int = 2, top_k_per_query: int = 15) -> pl.DataFrame:
+                     country: str, out_dir: Path, freq_cap: int = 2000, k_tokens: int = 2, top_k_per_query: int = 15) -> tuple[pl.LazyFrame, int]:
     """Pass B: address blocking. Key = house_num + each of the rarest addr_street tokens.
 
     Direction: S2/S3 → S1, within country.
@@ -222,7 +229,8 @@ def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
             s1_index[key].append((row["entity_id"], idf.get(token, 10.0)))
 
     # Query S2/S3 records
-    results = []
+    chunk_files = []
+    total_pairs = 0
     chunk_size = 50_000
     n_chunks = max(1, math.ceil(query_records.height / chunk_size))
 
@@ -254,12 +262,16 @@ def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                     pairs.append((row["entity_id"], s1_id, s1_scores[s1_id]))
 
         if pairs:
-            results.append(pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row"))
+            chunk_df = pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
+            total_pairs += chunk_df.height
+            chunk_path = out_dir / f"addr_pass_{i}.parquet"
+            chunk_df.write_parquet(chunk_path)
+            chunk_files.append(chunk_path)
 
-    if not results:
-        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64})
+    if not chunk_files:
+        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64}).lazy(), 0
 
-    return pl.concat(results)
+    return pl.scan_parquet([str(p) for p in chunk_files]), total_pairs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -269,7 +281,7 @@ def address_key_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
 
 def house_num_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
                    idf: dict[str, float], country_df: dict[str, int],
-                   country: str, freq_cap: int = 50) -> pl.DataFrame:
+                   country: str, out_dir: Path, freq_cap: int = 50) -> tuple[pl.LazyFrame, int]:
     """Pass C: house-number-only blocking for distinctive house numbers.
 
     Direction: S2/S3 → S1, within country.
@@ -297,19 +309,33 @@ def house_num_pass(s1_records: pl.DataFrame, query_records: pl.DataFrame,
             s1_index[house] = []
         s1_index[house].append((row["entity_id"], idf.get(house, 5.0)))
 
-    pairs: list[tuple[str, str, float]] = []
+    chunk_files = []
+    total_pairs = 0
+    chunk_size = 200_000
+    n_chunks = max(1, math.ceil(query_records.height / chunk_size))
 
-    for row in query_records.select("entity_id", "house_num").iter_rows(named=True):
-        house = row["house_num"] or ""
-        if not house or country_df.get(house, 0) > freq_cap or house not in s1_index:
-            continue
-        for s1_id, score in s1_index[house]:
-            pairs.append((row["entity_id"], s1_id, score))
+    for i in range(n_chunks):
+        pairs: list[tuple[str, str, float]] = []
+        chunk = query_records.slice(i * chunk_size, chunk_size)
 
-    if not pairs:
-        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64})
+        for row in chunk.select("entity_id", "house_num").iter_rows(named=True):
+            house = row["house_num"] or ""
+            if not house or country_df.get(house, 0) > freq_cap or house not in s1_index:
+                continue
+            for s1_id, score in s1_index[house]:
+                pairs.append((row["entity_id"], s1_id, score))
 
-    return pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
+        if pairs:
+            chunk_df = pl.DataFrame(pairs, schema=["cand_id", "s1_id", "score"], orient="row")
+            total_pairs += chunk_df.height
+            chunk_path = out_dir / f"house_pass_{i}.parquet"
+            chunk_df.write_parquet(chunk_path)
+            chunk_files.append(chunk_path)
+
+    if not chunk_files:
+        return pl.DataFrame(schema={"cand_id": pl.String, "s1_id": pl.String, "score": pl.Float64}).lazy(), 0
+
+    return pl.scan_parquet([str(p) for p in chunk_files]), total_pairs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

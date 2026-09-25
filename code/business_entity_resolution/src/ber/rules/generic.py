@@ -88,3 +88,10 @@ STRIP_PREFIXES: set[str] = {
 
 # ── Junk characters to strip from the start/end of names ────────────────────
 JUNK_CHARS: str = "-<>\"'`~!@#$%^*+={}[]|\\:;,.?/"
+
+# ── Tokens after which a number is NOT a house number ───────────────────────
+NON_HOUSE_MARKERS: set[str] = {
+    "sector", "block", "phase", "ward", "stage", "lane", "cross", "main",
+    "zone", "pocket", "part", "wing", "tower", "floor", "fl",
+    "apt", "apartment", "suite", "ste", "unit", "flat",
+}

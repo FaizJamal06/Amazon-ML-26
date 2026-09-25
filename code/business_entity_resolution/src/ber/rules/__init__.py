@@ -65,10 +65,7 @@ def non_house_markers(country: str) -> set[str]:
 
     Applied universally — these are country-generic structural location markers.
     """
-    base = {
-        "sector", "block", "phase", "ward", "stage", "lane", "cross", "main",
-        "zone", "pocket", "part", "wing", "tower", "floor", "fl",
-    }
+    base = set(generic.NON_HOUSE_MARKERS)
     mod = _COUNTRY_MODULES.get(country)
     extra = getattr(mod, "NON_HOUSE_MARKERS", set()) if mod else set()
     return base | extra

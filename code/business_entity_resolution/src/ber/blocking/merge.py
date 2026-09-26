@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import time
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 from rapidfuzz import fuzz
 
+from ber.blocking.fuzzy import FuzzyIndex, build_fuzzy_index, query_fuzzy
 from ber.blocking.keys import (
+    PAIR_SCHEMA,
     build_address_index,
     build_combo_index,
     build_house_index,
@@ -41,12 +44,14 @@ PASS_NAME_TOKEN = 0    # bit 0 (1 << 0 = 1)
 PASS_ADDR_KEY = 1      # bit 1 (1 << 1 = 2)
 PASS_HOUSE_NUM = 2     # bit 2 (1 << 2 = 4)
 PASS_NAME_STREET = 3   # bit 3 (1 << 3 = 8): exact name + (name token, street token) keys, scale-proof
+PASS_FUZZY = 4         # bit 4 (1 << 4 = 16): char 3-gram TF-IDF cosine on names (fuzzy.py), weak records only
 
 PASS_NAMES: dict[int, str] = {
     PASS_NAME_TOKEN: "name_token",
     PASS_ADDR_KEY: "addr_key",
     PASS_HOUSE_NUM: "house_num",
     PASS_NAME_STREET: "name_street",
+    PASS_FUZZY: "fuzzy",
 }
 
 # rank_score = weighted cheap similarities (0-1 scale; a house-number conflict can push it below 0)
@@ -149,81 +154,141 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
 
 
 PASS_LIMITS = {"name_freq_cap": 2000, "addr_freq_cap": 2000, "house_freq_cap": 50, "top_k_per_query": 50,
-               "name_pair_keys": 0, "addr_key_cap": 0, "name_street_cap": 0}
+               "name_pair_keys": 0, "addr_key_cap": 0, "name_street_cap": 0,
+               "fuzzy": 0, "fuzzy_min_score": 0.8, "fuzzy_max_df": 0.002, "fuzzy_top_k": 20}
 # name_pair_keys: 1 = also key on pairs of frequent name tokens (keys._pair_keys).
 # addr_key_cap: 0 = street tokens above addr_freq_cap are skipped; N > 0 = no token cap, but (number, token) keys shared
 # by more than N S1s are dropped (keys._street_keys).
 # name_street_cap: 0 = pass D off; N > 0 = pass D on (exact-name + (name token, street token) keys, keys shared by
 # more than N S1s dropped; keys._combo_keys).
+# fuzzy: 1 = pass E on (fuzzy.py) for query records whose best rank_score from the other passes is < fuzzy_min_score.
+
+
+def pass_limits(cfg: Config) -> dict:
+    """PASS_LIMITS overridden by the ``blocking.*`` config keys of the same name (bools -> 0/1)."""
+    return {k: type(v)(cfg.get(f"blocking.{k}", v)) for k, v in PASS_LIMITS.items()}
+
+
+@dataclass
+class CountryIndex:
+    """What every pass needs for one country: pool document frequencies / IDF and the S1 indexes (built once)."""
+    country: str
+    lim: dict
+    dfs: dict
+    idfs: dict
+    legal_skel: frozenset
+    name: dict
+    addr: dict
+    house: dict
+    combo: dict | None
+    fuzzy: FuzzyIndex | None
+
+
+def build_country_index(recs: pl.DataFrame, country: str, limits: dict | None = None) -> CountryIndex:
+    """IDF over all records of ``country`` (all sources) and the S1 indexes of every enabled pass."""
+    lim = {**PASS_LIMITS, **(limits or {})}
+    s1_recs = recs.filter(pl.col("source") == 1)
+    dfs = {c: compute_df_counts(recs, c, country) for c in ("name_core", "name_skeleton", "addr_norm", "house_num")}
+    idfs = {c: compute_token_idf(recs, c, country, df) for c, df in dfs.items()}  # idf from df: one pass per column
+    legal_skel = frozenset(tok for form in rules.legal_forms(country) for tok in name_skeleton(_normalize_base(form)).split())
+    return CountryIndex(
+        country, lim, dfs, idfs, legal_skel,
+        name=build_name_index(s1_recs, idfs["name_core"], dfs["name_core"], idfs["name_skeleton"], dfs["name_skeleton"],
+                              legal_skel, freq_cap=lim["name_freq_cap"], pair_keys=bool(lim["name_pair_keys"])),
+        addr=build_address_index(s1_recs, idfs["addr_norm"], dfs["addr_norm"], freq_cap=lim["addr_freq_cap"],
+                                 key_cap=lim["addr_key_cap"]),
+        house=build_house_index(s1_recs, idfs["house_num"], dfs["house_num"], freq_cap=lim["house_freq_cap"]),
+        combo=(build_combo_index(s1_recs, idfs["name_core"], idfs["name_skeleton"], idfs["addr_norm"], legal_skel,
+                                 key_cap=lim["name_street_cap"]) if lim["name_street_cap"] else None),
+        fuzzy=build_fuzzy_index(s1_recs, lim["fuzzy_max_df"]) if lim["fuzzy"] else None,
+    )
+
+
+def query_passes(ix: CountryIndex, part: pl.DataFrame) -> pl.DataFrame:
+    """Key passes A-D for a chunk of S2/S3 records -> raw hits (cand_id, s1_id, score, bit). Pass E runs later."""
+    lim, dfs, idfs = ix.lim, ix.dfs, ix.idfs
+    frames = [
+        query_name_index(ix.name, part, idfs["name_core"], dfs["name_core"], idfs["name_skeleton"],
+                         dfs["name_skeleton"], ix.legal_skel, freq_cap=lim["name_freq_cap"],
+                         top_k_per_query=lim["top_k_per_query"], pair_keys=bool(lim["name_pair_keys"]))
+        .with_columns(bit=PASS_NAME_TOKEN),
+        query_address_index(ix.addr, part, idfs["addr_norm"], dfs["addr_norm"], freq_cap=lim["addr_freq_cap"],
+                            top_k_per_query=lim["top_k_per_query"], key_cap=lim["addr_key_cap"])
+        .with_columns(bit=PASS_ADDR_KEY),
+        query_house_index(ix.house, part, dfs["house_num"], freq_cap=lim["house_freq_cap"]).with_columns(bit=PASS_HOUSE_NUM),
+    ]
+    if ix.combo is not None:
+        frames.append(query_combo_index(ix.combo, part, idfs["name_core"], idfs["name_skeleton"], idfs["addr_norm"],
+                                        ix.legal_skel, top_k_per_query=lim["top_k_per_query"])
+                      .with_columns(bit=PASS_NAME_STREET))
+    return pl.concat(frames).with_columns(pl.col("bit").cast(pl.Int8))
+
+
+def rerank_chunk(ix: CountryIndex, raw: pl.DataFrame, part: pl.DataFrame, pass_max: dict[int, float],
+                 rank_recs: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Merge a chunk's raw hits (normalized by the country-wide pass maxima), add rank_score, and, when pass E is on,
+    add fuzzy hits for the records whose best rank_score is below fuzzy_min_score (or that got nothing).
+
+    Returns (merged pairs with block_mask / block_score / rank_score / country, the fuzzy raw hits).
+    """
+    merged = _merge_passes(raw, pass_max)
+    merged = merged.with_columns(rank_scores(merged, rank_recs))
+    fz = pl.DataFrame(schema={**PAIR_SCHEMA, "bit": pl.Int8})
+    if ix.fuzzy is not None:
+        best = merged.group_by("cand_id").agg(best=pl.col("rank_score").max())
+        weak = (part.join(best, left_on="entity_id", right_on="cand_id", how="left")
+                .filter(pl.col("best").is_null() | (pl.col("best") < ix.lim["fuzzy_min_score"])))
+        fz = query_fuzzy(ix.fuzzy, weak, top_k=ix.lim["fuzzy_top_k"]).with_columns(bit=pl.lit(PASS_FUZZY, pl.Int8))
+        if fz.height:
+            known = merged.select("s1_id", "cand_id", "rank_score")
+            merged = (_merge_passes(pl.concat([raw, fz]), {**pass_max, PASS_FUZZY: 1.0})   # cosine is already 0-1
+                      .join(known, on=["s1_id", "cand_id"], how="left"))
+            new = merged.filter(pl.col("rank_score").is_null()).drop("rank_score")
+            merged = pl.concat([merged.filter(pl.col("rank_score").is_not_null()),
+                                new.with_columns(rank_scores(new, rank_recs))])
+    return merged.with_columns(country=pl.lit(ix.country)), fz
 
 
 def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int, k_per_query: int,
-                   min_score: float | None, limits: dict[str, int] = PASS_LIMITS) -> list[Path]:
+                   min_score: float | None, limits: dict | None = None) -> list[Path]:
     """Stream one country: S1 indexes built once, S2/S3 queried in chunks of ``chunk_rows`` records.
 
-    Phase 1: every pass runs on each chunk; raw hits go to disk and the per-pass max score is tracked.
-    Phase 2: each chunk is normalized with the country-wide pass maxima, merged, re-ranked (rank_score) and cut to
-    the top ``k_per_query`` S1s per cand_id; the (small) result goes to disk. Returns the result files.
-    Memory is bounded by the chunk (+ the country's S1 indexes), not by the country's pair count.
-    ``limits`` (PASS_LIMITS keys): tokens / house numbers with a document frequency above the cap are not used as
-    keys; each pass keeps at most top_k_per_query S1s per record.
+    Phase 1: passes A-D run on each chunk; raw hits go to disk and the per-pass max score is tracked.
+    Phase 2: each chunk is normalized with the country-wide pass maxima, merged, re-ranked (rank_score; pass E for
+    weak records when on) and cut to the top ``k_per_query`` S1s per cand_id; the (small) result goes to disk.
+    Returns the result files. Memory is bounded by the chunk (+ the country's S1 indexes), not by the pair count.
     """
-    lim = {**PASS_LIMITS, **limits}
-    s1_recs, query_recs = recs.filter(pl.col("source") == 1), recs.filter(pl.col("source") > 1)
-    print(f"\n  -- {country}: {s1_recs.height:,} S1, {query_recs.height:,} S2/S3 --")
-    if s1_recs.height == 0 or query_recs.height == 0:
+    s1_n, query_recs = recs.filter(pl.col("source") == 1).height, recs.filter(pl.col("source") > 1)
+    print(f"\n  -- {country}: {s1_n:,} S1, {query_recs.height:,} S2/S3 --", flush=True)
+    if s1_n == 0 or query_recs.height == 0:
         return []
-    dfs = {c: compute_df_counts(recs, c, country) for c in ("name_core", "name_skeleton", "addr_norm", "house_num")}
-    idfs = {c: compute_token_idf(recs, c, country, df) for c, df in dfs.items()}  # idf from df: one pass per column
-    (name_idf, skel_idf, addr_idf, house_idf), (name_df, skel_df, addr_df, house_df) = idfs.values(), dfs.values()
     t = time.time()
-    legal_skel = frozenset(t for form in rules.legal_forms(country) for t in name_skeleton(_normalize_base(form)).split())
-    name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel,
-                                  freq_cap=lim["name_freq_cap"], pair_keys=bool(lim["name_pair_keys"]))
-    addr_index = build_address_index(s1_recs, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"],
-                                     key_cap=lim["addr_key_cap"])
-    house_index = build_house_index(s1_recs, house_idf, house_df, freq_cap=lim["house_freq_cap"])
-    combo_index = (build_combo_index(s1_recs, name_idf, skel_idf, addr_idf, legal_skel, key_cap=lim["name_street_cap"])
-                   if lim["name_street_cap"] else None)
-    print(f"    indexes built in {time.time() - t:.1f}s")
+    ix = build_country_index(recs, country, limits)
+    print(f"    indexes built in {time.time() - t:.1f}s", flush=True)
 
     raw_files, pass_max, n_raw = [], {}, 0
     for i, lo in enumerate(range(0, query_recs.height, chunk_rows)):  # chunks of records, not rows
-        part = query_recs.slice(lo, chunk_rows)
-        raw = pl.concat([
-            query_name_index(name_index, part, name_idf, name_df, skel_idf, skel_df, legal_skel,
-                             freq_cap=lim["name_freq_cap"], top_k_per_query=lim["top_k_per_query"],
-                             pair_keys=bool(lim["name_pair_keys"]))
-            .with_columns(bit=PASS_NAME_TOKEN),
-            query_address_index(addr_index, part, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"],
-                                top_k_per_query=lim["top_k_per_query"], key_cap=lim["addr_key_cap"])
-            .with_columns(bit=PASS_ADDR_KEY),
-            query_house_index(house_index, part, house_df, freq_cap=lim["house_freq_cap"])
-            .with_columns(bit=PASS_HOUSE_NUM),
-            *([query_combo_index(combo_index, part, name_idf, skel_idf, addr_idf, legal_skel,
-                                 top_k_per_query=lim["top_k_per_query"]).with_columns(bit=PASS_NAME_STREET)]
-              if combo_index is not None else []),
-        ]).with_columns(pl.col("bit").cast(pl.Int8))
+        raw = query_passes(ix, query_recs.slice(lo, chunk_rows))
         for bit, mx in raw.group_by("bit").agg(pl.col("score").max()).iter_rows():
             pass_max[bit] = max(pass_max.get(bit, 0.0), mx)
         n_raw += raw.height
         raw_files.append(tmp / f"{country}_raw_{i:05d}.parquet")
         raw.write_parquet(raw_files[-1])
-    del name_index, addr_index, house_index, combo_index
-    print(f"    phase 1: {n_raw:,} raw pass hits in {len(raw_files)} chunks ({time.time() - t:.1f}s)")
+    ix.name = ix.addr = ix.house = ix.combo = None   # free the key indexes; pass E (if on) is still needed
+    print(f"    phase 1: {n_raw:,} raw pass hits in {len(raw_files)} chunks ({time.time() - t:.1f}s)", flush=True)
 
     rank_recs = recs.select("entity_id", *RANK_FIELDS)
-    kept_files, n_merged, n_kept = [], 0, 0
+    kept_files, n_merged, n_kept, n_fuzzy = [], 0, 0, 0
     for i, path in enumerate(raw_files):
-        merged = _merge_passes(pl.read_parquet(path), pass_max)
-        merged = merged.with_columns(rank_scores(merged, rank_recs), country=pl.lit(country))
+        merged, fz = rerank_chunk(ix, pl.read_parquet(path), query_recs.slice(i * chunk_rows, chunk_rows), pass_max,
+                                  rank_recs)
         kept = _rank_per_cand(merged, k_per_query, min_score)
-        n_merged, n_kept = n_merged + merged.height, n_kept + kept.height
+        n_merged, n_kept, n_fuzzy = n_merged + merged.height, n_kept + kept.height, n_fuzzy + fz.height
         kept_files.append(tmp / f"{country}_kept_{i:05d}.parquet")
         kept.write_parquet(kept_files[-1])
         path.unlink()
-    print(f"    phase 2: {n_merged:,} unique pairs re-ranked, {n_kept:,} kept (k={k_per_query}) "
-          f"({time.time() - t:.1f}s)")
+    print(f"    phase 2: {n_merged:,} unique pairs re-ranked ({n_fuzzy:,} fuzzy hits), {n_kept:,} kept "
+          f"(k={k_per_query}) ({time.time() - t:.1f}s)", flush=True)
     return kept_files
 
 
@@ -243,7 +308,7 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
     k_per_query = int(cfg.get("blocking.k_per_query", 2)) if k_per_query is None else k_per_query
     min_score = cfg.get("blocking.min_score", None)   # None or 0 = off
     chunk_rows = int(cfg.get("blocking.chunk_rows", 50_000))
-    limits = {k: int(cfg.get(f"blocking.{k}", v)) for k, v in PASS_LIMITS.items()}
+    limits = pass_limits(cfg)
     print(f"  k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}, chunk_rows={chunk_rows}, "
           f"limits={limits}")
 
@@ -252,7 +317,8 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
         kept_files = []
         for country in countries:  # countries, not rows
             tc = time.time()
-            recs = pl.scan_parquet(path).filter(pl.col("country") == country).select(RECORD_COLS).collect()
+            cols = RECORD_COLS + (["name_raw"] if limits["fuzzy"] else [])   # pass E cleans handles from name_raw
+            recs = pl.scan_parquet(path).filter(pl.col("country") == country).select(cols).collect()
             kept_files += _block_country(recs, country, Path(tmp), chunk_rows, k_per_query, min_score, limits)
             del recs
             print(f"    {country} done in {time.time() - tc:.1f}s")

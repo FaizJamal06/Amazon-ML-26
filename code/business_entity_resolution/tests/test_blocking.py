@@ -85,17 +85,22 @@ def test_ties_are_deterministic():
     assert outs[0][:2] == [("c1", "S1-3", 1), ("c1", "S1-5", 2)]
 
 
+def _stub_sources(cache: Path) -> list[str]:
+    """Write a stub world's raw sources (train, US + India) into ``cache``; return the --set args for that cache."""
+    rec, _, _ = stub.build_split("train", ["US", "India"], 30, np.random.default_rng(42))
+    for src in (1, 2, 3):
+        rec.filter(pl.col("source") == src).select(
+            "entity_id", business_name="name_raw", business_address="addr_raw", country="country",
+            source=pl.col("source").cast(pl.String)).write_parquet(cache / f"source{src}_train.parquet")
+    return ["--set", f"paths.cache_dir={cache}"]
+
+
 def test_config_k_per_query_is_honored():
     """normalize + block on a stub world: --set blocking.k_per_query=1 gives fewer pairs than the default (2),
     and every kept rank_in_cand is <= k. Streaming in tiny chunks (7 query records) gives the identical output."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         cache = Path(d)
-        rec, _, _ = stub.build_split("train", ["US", "India"], 30, np.random.default_rng(42))
-        for src in (1, 2, 3):
-            rec.filter(pl.col("source") == src).select(
-                "entity_id", business_name="name_raw", business_address="addr_raw", country="country",
-                source=pl.col("source").cast(pl.String)).write_parquet(cache / f"source{src}_train.parquet")
-        sets = ["--set", f"paths.cache_dir={cache}"]
+        sets = _stub_sources(cache)
         with contextlib.redirect_stdout(io.StringIO()):
             main(["normalize", "--split", "train", *sets])
             main(["block", "--split", "train", *sets])
@@ -109,10 +114,34 @@ def test_config_k_per_query_is_honored():
     assert k2_small_chunks.equals(k2)
 
 
+def test_parallel_block_identical():
+    """Chunk-parallel block: workers=1 and workers=4 (fork pool) give identical candidates on a stub world.
+
+    Fork-only, so it is skipped where the 'fork' start method does not exist (Windows); it runs on the Linux server.
+    If it hangs there, polars' thread pool did not survive fork: use blocking.pool_start=spawn instead.
+    """
+    import multiprocessing as mp
+    if "fork" not in mp.get_all_start_methods():
+        print("SKIP test_parallel_block_identical: needs the 'fork' start method (Linux/macOS), not available here; "
+              "it runs on the Linux server")
+        return
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        cache = Path(d)
+        sets = _stub_sources(cache) + ["--set", "blocking.chunk_rows=7"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(["normalize", "--split", "train", *sets])
+            main(["block", "--split", "train", *sets, "--set", "blocking.workers=1"])
+            one = pl.read_parquet(cache / "candidates_train.parquet")
+            main(["block", "--split", "train", *sets, "--set", "blocking.workers=4", "--set", "blocking.pool_start=fork"])
+            four = pl.read_parquet(cache / "candidates_train.parquet")
+    assert one.height > 0 and four.equals(one)
+
+
 if __name__ == "__main__":
     test_merge_normalizes_each_pass()
     test_exact_name_same_street_outranks_shared_house_number()
     test_rank_in_cand_is_computed_before_capping()
     test_ties_are_deterministic()
     test_config_k_per_query_is_honored()
+    test_parallel_block_identical()
     print("blocking tests passed")

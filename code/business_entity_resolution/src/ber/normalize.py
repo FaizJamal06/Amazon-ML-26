@@ -136,6 +136,37 @@ def _normalize_base(text: str) -> str:
     return text
 
 
+# Handles and domains used as a business name: '#salinasguggenheim', '@nizarmarine', 'REEDPIZZA.COM'
+_HANDLE_PREFIX = r"^\s*[@#]+"
+_DOMAIN_SUFFIX = r"(?i)\.(?:com|in|net|org|co)\s*$"
+_CAMEL_SPLIT = (r"([a-z])([A-Z])", "$1 $2")      # polars replacement syntax; the Python version uses \1 \2
+
+
+def strip_handle(name: str) -> str:
+    """Business name written as a handle / domain -> plain words (raw case kept).
+
+    Strips a leading @/#, a trailing .com/.in/.net/.org/.co and splits camelCase:
+    '#salinasguggenheim' -> 'salinasguggenheim', 'REEDPIZZA.COM' -> 'REEDPIZZA', 'ReedPizza' -> 'Reed Pizza'.
+    Names that are not handles pass through unchanged.
+    """
+    name = re.sub(_DOMAIN_SUFFIX, "", re.sub(_HANDLE_PREFIX, "", name))
+    return re.sub(_CAMEL_SPLIT[0], r"\1 \2", name).strip()
+
+
+def is_handle_expr(col: str = "name_raw") -> pl.Expr:
+    """Vectorized: True where the raw name looks like a handle or a domain (leading @/#, trailing .com etc.) or is
+    one camelCase token ('ReedPizza')."""
+    c = pl.col(col).str.strip_chars()
+    return (c.str.contains(_HANDLE_PREFIX) | c.str.contains(_DOMAIN_SUFFIX)
+            | (~c.str.contains(r"\s") & c.str.contains(_CAMEL_SPLIT[0])))
+
+
+def strip_handle_expr(col: str = "name_raw") -> pl.Expr:
+    """Vectorized ``strip_handle`` on a raw-name column, lowercased, non-alphanumerics -> space."""
+    return (pl.col(col).str.replace(_HANDLE_PREFIX, "").str.replace(_DOMAIN_SUFFIX, "")
+            .str.replace_all(*_CAMEL_SPLIT).str.to_lowercase().str.replace_all(r"[^\p{L}\p{N}]+", " ").str.strip_chars())
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # §3  NAME SKELETON (for blocking / dedup of transliteration variants)
 # ═══════════════════════════════════════════════════════════════════════════════

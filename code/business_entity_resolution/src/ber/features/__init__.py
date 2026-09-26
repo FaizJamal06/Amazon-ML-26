@@ -6,6 +6,9 @@ full-world records of the split (all sources), so sub-world rows get the same va
 Out: features_{split}.parquet with s1_id, cand_id, <feature columns (Float32)>, label (Int8, train only).
 Never reads any scores artifact (no model p -> no leakage across folds); tests/test_features.py checks this.
 
+Optional graph/cluster-consistency features (CLAUDE.md §5.3) are appended when ``features.graph`` is true
+(default true). Disable with ``--set features.graph=false`` to ablate them.
+
 Owner: Nitish (R3 Features / LightGBM)
 """
 from __future__ import annotations
@@ -44,7 +47,12 @@ def pair_features(ctx: pl.DataFrame, a_side: pl.DataFrame, b_side: pl.DataFrame,
 
 
 def build_features(cfg: Config, split: str, subworld: bool) -> None:
-    """Stage ``featurize``: write ``features_{split}`` in chunks of ``features.chunk_pairs`` pairs (streamed)."""
+    """Stage ``featurize``: write ``features_{split}`` in chunks of ``features.chunk_pairs`` pairs (streamed).
+
+    Optionally appends graph/cluster-consistency features (features.graph: true, default true) computed
+    from within-S1 candidate agreement — see ``ber.features.graph.graph_features``. Disable with
+    ``--set features.graph=false`` for ablation or to save compute when graph features are not needed.
+    """
     cand = pl.read_parquet(cfg.artifact("candidates", split, subworld)).sort(KEYS)
     rec = pl.read_parquet(cfg.artifact("records", split, subworld))
     full = cfg.artifact("records", split)
@@ -53,6 +61,17 @@ def build_features(cfg: Config, split: str, subworld: bool) -> None:
     name_idf, street_idf, freq = token_idf(pool, "name_core"), token_idf(pool, "addr_street"), name_freq(pool)
     ctx = pl.concat([cand.select("country"), context_features(cand)], how="horizontal")
     a_side, b_side = _side(rec, "a", "s1_id"), _side(rec, "b", "cand_id")
+
+    # Graph features are computed once over the full candidate set (before chunking) and sliced per chunk.
+    # Gated by features.graph (default true) so they can be turned off for ablation.
+    use_graph = bool(cfg.get("features.graph", True))
+    graph_df = None
+    if use_graph:
+        from ber.features.graph import graph_features
+        print("featurize: computing graph features ...", flush=True)
+        graph_df = graph_features(cand, rec).sort(KEYS)
+        print(f"featurize: graph done, {graph_df.height:,} rows x {graph_df.width - 2} graph cols", flush=True)
+
     gt = None
     if split == "train":
         gt = pl.read_parquet(cfg.artifact("gt", split, subworld)).select(
@@ -62,6 +81,10 @@ def build_features(cfg: Config, split: str, subworld: bool) -> None:
     try:
         for lo in range(0, ctx.height, chunk):  # chunks of pairs, not rows
             out = pair_features(ctx.slice(lo, chunk), a_side, b_side, name_idf, street_idf, freq)
+            if graph_df is not None:
+                # graph_df is sorted identically to cand/ctx — slice the matching rows.
+                g_slice = graph_df.slice(lo, chunk).drop("s1_id", "cand_id")
+                out = pl.concat([out, g_slice], how="horizontal")
             if gt is not None:
                 out = out.join(gt, on=KEYS, how="left", maintain_order="left").with_columns(pl.col("label").fill_null(0))
                 n_pos += int(out["label"].sum())

@@ -1,6 +1,6 @@
-# Fuzzy blocking: status (Sat 26 Sep, ~13:30 IST, branch `r1/fuzzy`)
+# Fuzzy blocking: status (Sat 26 Sep, branch `r1/fuzzy`, merged to main with fuzzy off / workers 1)
 
-Stopped because the laptop battery was dying. Everything is pushed to `r1/fuzzy`. **Not merged to main.**
+Merged to main with the defaults unchanged. On the laptop: all tests pass, the stub validator passes, and the 20k smoke candidates hash equals main's. The fuzzy on/off eval and the parallel verification are left for the server.
 Defaults are unchanged: `blocking.fuzzy: false`, `blocking.workers: 1`.
 
 ## Done (committed)
@@ -74,9 +74,10 @@ It agrees with the partial full-train block from the morning (India k=2 0.876). 
    - `blocking.workers` N>1 runs phase 1 and phase 2 over chunks with `pool.map`, which keeps order, so the output should be identical.
    - `blocking.pool_start`: `spawn` by default. It works on Windows and Linux; the index is pickled to each worker, so RAM is roughly workers × index (~6–7 GB per country → about 8–12 workers on 128 GB).
    - `fork` is opt-in: polars warns that forked children can deadlock once the parent used its thread pool. Test it on the stub world with a timeout before using it.
-   - **To verify:**
-     - run `tests/test_blocking.py` (it asserts 2-worker output == sequential on the stub world);
-     - then hash-compare the 20k smoke world with `--set blocking.workers=1` vs `--set blocking.workers=4`. The reference hash with defaults is `42dcbd90e3b89534`.
+   - **To verify on the Linux server:**
+     - `tests/test_blocking.py::test_parallel_block_identical` asserts workers=1 == workers=4 with `pool_start=fork` on a stub world. It is skipped on Windows, where fork doesn't exist.
+     - If it hangs, polars did not survive fork: use `blocking.pool_start=spawn`.
+     - Then hash-compare the 20k smoke world with workers 1 vs N. The reference hash with defaults is `42dcbd90e3b89534`.
 4. **Measure each step on the full-density eval and log it** (`notes/EXPERIMENTS.md` has no rows for this branch yet):
    - baseline (above);
    - fuzzy on;

@@ -15,6 +15,8 @@ blocking:
   fuzzy_min_score: 0.8   # pass E runs for S2/S3 records whose best rank_score from passes A-D is below this
   fuzzy_max_df: 0.002    # drop 3-grams found in more than this share of the country's S1 names
   fuzzy_top_k: 20        # S1s kept per record by pass E
+  workers: 1             # chunk-parallel block (both phases); output identical for any value. RAM ~ x workers (spawn)
+  pool_start: spawn      # spawn (safe everywhere, index pickled to each worker) | fork (Linux opt-in; polars may deadlock)
 
 decide:
   method: threshold      # threshold | ef05_exact | ef05_approx (v2 only after it wins on real full-world OOF)

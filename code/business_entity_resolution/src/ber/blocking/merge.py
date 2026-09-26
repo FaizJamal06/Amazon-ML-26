@@ -11,6 +11,7 @@ Owner: Dhanishkaa (R2 Normalize / Blocking)
 """
 from __future__ import annotations
 
+import multiprocessing as mp
 import time
 import tempfile
 from dataclasses import dataclass
@@ -204,20 +205,25 @@ def build_country_index(recs: pl.DataFrame, country: str, limits: dict | None = 
     )
 
 
-def query_passes(ix: CountryIndex, part: pl.DataFrame) -> pl.DataFrame:
-    """Key passes A-D for a chunk of S2/S3 records -> raw hits (cand_id, s1_id, score, bit). Pass E runs later."""
+def query_passes(ix: CountryIndex, part: pl.DataFrame, only: set[int] | None = None) -> pl.DataFrame:
+    """Key passes A-D for a chunk of S2/S3 records -> raw hits (cand_id, s1_id, score, bit). Pass E runs later.
+    ``only``: run just these pass bits (profiling)."""
     lim, dfs, idfs = ix.lim, ix.dfs, ix.idfs
-    frames = [
-        query_name_index(ix.name, part, idfs["name_core"], dfs["name_core"], idfs["name_skeleton"],
-                         dfs["name_skeleton"], ix.legal_skel, freq_cap=lim["name_freq_cap"],
-                         top_k_per_query=lim["top_k_per_query"], pair_keys=bool(lim["name_pair_keys"]))
-        .with_columns(bit=PASS_NAME_TOKEN),
-        query_address_index(ix.addr, part, idfs["addr_norm"], dfs["addr_norm"], freq_cap=lim["addr_freq_cap"],
-                            top_k_per_query=lim["top_k_per_query"], key_cap=lim["addr_key_cap"])
-        .with_columns(bit=PASS_ADDR_KEY),
-        query_house_index(ix.house, part, dfs["house_num"], freq_cap=lim["house_freq_cap"]).with_columns(bit=PASS_HOUSE_NUM),
-    ]
-    if ix.combo is not None:
+    run = lambda bit: only is None or bit in only  # noqa: E731
+    frames = []
+    if run(PASS_NAME_TOKEN):
+        frames.append(query_name_index(ix.name, part, idfs["name_core"], dfs["name_core"], idfs["name_skeleton"],
+                                       dfs["name_skeleton"], ix.legal_skel, freq_cap=lim["name_freq_cap"],
+                                       top_k_per_query=lim["top_k_per_query"], pair_keys=bool(lim["name_pair_keys"]))
+                      .with_columns(bit=PASS_NAME_TOKEN))
+    if run(PASS_ADDR_KEY):
+        frames.append(query_address_index(ix.addr, part, idfs["addr_norm"], dfs["addr_norm"],
+                                          freq_cap=lim["addr_freq_cap"], top_k_per_query=lim["top_k_per_query"],
+                                          key_cap=lim["addr_key_cap"]).with_columns(bit=PASS_ADDR_KEY))
+    if run(PASS_HOUSE_NUM):
+        frames.append(query_house_index(ix.house, part, dfs["house_num"], freq_cap=lim["house_freq_cap"])
+                      .with_columns(bit=PASS_HOUSE_NUM))
+    if ix.combo is not None and run(PASS_NAME_STREET):
         frames.append(query_combo_index(ix.combo, part, idfs["name_core"], idfs["name_skeleton"], idfs["addr_norm"],
                                         ix.legal_skel, top_k_per_query=lim["top_k_per_query"])
                       .with_columns(bit=PASS_NAME_STREET))
@@ -250,13 +256,15 @@ def rerank_chunk(ix: CountryIndex, raw: pl.DataFrame, part: pl.DataFrame, pass_m
 
 
 def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int, k_per_query: int,
-                   min_score: float | None, limits: dict | None = None) -> list[Path]:
+                   min_score: float | None, limits: dict | None = None, workers: int = 1,
+                   pool_start: str = "spawn") -> list[Path]:
     """Stream one country: S1 indexes built once, S2/S3 queried in chunks of ``chunk_rows`` records.
 
     Phase 1: passes A-D run on each chunk; raw hits go to disk and the per-pass max score is tracked.
     Phase 2: each chunk is normalized with the country-wide pass maxima, merged, re-ranked (rank_score; pass E for
     weak records when on) and cut to the top ``k_per_query`` S1s per cand_id; the (small) result goes to disk.
     Returns the result files. Memory is bounded by the chunk (+ the country's S1 indexes), not by the pair count.
+    With ``workers`` > 1 both phases run their chunks in a process pool (_map_chunks); the output is identical.
     """
     s1_n, query_recs = recs.filter(pl.col("source") == 1).height, recs.filter(pl.col("source") > 1)
     print(f"\n  -- {country}: {s1_n:,} S1, {query_recs.height:,} S2/S3 --", flush=True)
@@ -265,31 +273,74 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
     t = time.time()
     ix = build_country_index(recs, country, limits)
     print(f"    indexes built in {time.time() - t:.1f}s", flush=True)
+    ctx = dict(ix=ix, query_recs=query_recs, rank_recs=recs.select("entity_id", *RANK_FIELDS), chunk_rows=chunk_rows,
+               tmp=tmp, country=country, k_per_query=k_per_query, min_score=min_score)
+    chunks = list(range(-(-query_recs.height // chunk_rows)))
 
-    raw_files, pass_max, n_raw = [], {}, 0
-    for i, lo in enumerate(range(0, query_recs.height, chunk_rows)):  # chunks of records, not rows
-        raw = query_passes(ix, query_recs.slice(lo, chunk_rows))
-        for bit, mx in raw.group_by("bit").agg(pl.col("score").max()).iter_rows():
+    res1 = _map_chunks(_phase1_chunk, chunks, ctx, workers, pool_start)
+    pass_max: dict[int, float] = {}
+    for _, maxes, _ in res1:  # chunks, not rows
+        for bit, mx in maxes.items():
             pass_max[bit] = max(pass_max.get(bit, 0.0), mx)
-        n_raw += raw.height
-        raw_files.append(tmp / f"{country}_raw_{i:05d}.parquet")
-        raw.write_parquet(raw_files[-1])
-    ix.name = ix.addr = ix.house = ix.combo = None   # free the key indexes; pass E (if on) is still needed
-    print(f"    phase 1: {n_raw:,} raw pass hits in {len(raw_files)} chunks ({time.time() - t:.1f}s)", flush=True)
+    print(f"    phase 1: {sum(r[2] for r in res1):,} raw pass hits in {len(chunks)} chunks ({time.time() - t:.1f}s)",
+          flush=True)
 
-    rank_recs = recs.select("entity_id", *RANK_FIELDS)
-    kept_files, n_merged, n_kept, n_fuzzy = [], 0, 0, 0
-    for i, path in enumerate(raw_files):
-        merged, fz = rerank_chunk(ix, pl.read_parquet(path), query_recs.slice(i * chunk_rows, chunk_rows), pass_max,
-                                  rank_recs)
-        kept = _rank_per_cand(merged, k_per_query, min_score)
-        n_merged, n_kept, n_fuzzy = n_merged + merged.height, n_kept + kept.height, n_fuzzy + fz.height
-        kept_files.append(tmp / f"{country}_kept_{i:05d}.parquet")
-        kept.write_parquet(kept_files[-1])
-        path.unlink()
-    print(f"    phase 2: {n_merged:,} unique pairs re-ranked ({n_fuzzy:,} fuzzy hits), {n_kept:,} kept "
-          f"(k={k_per_query}) ({time.time() - t:.1f}s)", flush=True)
-    return kept_files
+    ctx["pass_max"] = pass_max
+    res2 = _map_chunks(_phase2_chunk, chunks, ctx, workers, pool_start)
+    print(f"    phase 2: {sum(r[1] for r in res2):,} unique pairs re-ranked ({sum(r[3] for r in res2):,} fuzzy hits), "
+          f"{sum(r[2] for r in res2):,} kept (k={k_per_query}) ({time.time() - t:.1f}s)", flush=True)
+    return [Path(r[0]) for r in res2]
+
+
+_CHUNK_CTX: dict = {}   # per-process context of the chunk workers (country index, records, paths, settings)
+
+
+def _init_chunk_worker(ctx: dict) -> None:
+    """Pool initializer (spawn): receive the country's index and chunk inputs once per worker process."""
+    _CHUNK_CTX.clear()
+    _CHUNK_CTX.update(ctx)
+
+
+def _phase1_chunk(i: int) -> tuple[str, dict, int]:
+    """Phase 1 of chunk ``i``: passes A-D -> raw hits on disk; returns (path, per-pass max score, #hits)."""
+    c = _CHUNK_CTX
+    raw = query_passes(c["ix"], c["query_recs"].slice(i * c["chunk_rows"], c["chunk_rows"]))
+    path = c["tmp"] / f"{c['country']}_raw_{i:05d}.parquet"
+    raw.write_parquet(path)
+    return str(path), dict(raw.group_by("bit").agg(pl.col("score").max()).iter_rows()), raw.height
+
+
+def _phase2_chunk(i: int) -> tuple[str, int, int, int]:
+    """Phase 2 of chunk ``i``: normalize with the country-wide maxima, merge, re-rank (+ pass E), cut to k -> disk.
+    Returns (kept path, #merged pairs, #kept pairs, #fuzzy hits)."""
+    c = _CHUNK_CTX
+    raw_path = c["tmp"] / f"{c['country']}_raw_{i:05d}.parquet"
+    merged, fz = rerank_chunk(c["ix"], pl.read_parquet(raw_path), c["query_recs"].slice(i * c["chunk_rows"],
+                                                                                          c["chunk_rows"]),
+                              c["pass_max"], c["rank_recs"])
+    kept = _rank_per_cand(merged, c["k_per_query"], c["min_score"])
+    path = c["tmp"] / f"{c['country']}_kept_{i:05d}.parquet"
+    kept.write_parquet(path)
+    raw_path.unlink()
+    return str(path), merged.height, kept.height, fz.height
+
+
+def _map_chunks(fn, chunks: list[int], ctx: dict, workers: int, pool_start: str) -> list:
+    """Run ``fn`` over the chunk indices, in order. Chunks are independent once the country index is built.
+
+    workers <= 1: in this process. Otherwise a multiprocessing pool (pool.map keeps chunk order, and every chunk's
+    result depends only on its own inputs + ctx, so the output is identical to the sequential run):
+    - 'spawn' (default, all platforms): ctx (incl. the index) is pickled to each worker once -> RAM x workers;
+    - 'fork' (Linux, opt-in): workers share ctx copy-on-write. Polars warns that a forked child can deadlock once the
+      parent has used its thread pool, so test it on the stub world before a full run.
+    """
+    _init_chunk_worker(ctx)
+    if workers <= 1 or len(chunks) <= 1:
+        return [fn(i) for i in chunks]
+    mpc = mp.get_context(pool_start)
+    init = dict(initializer=_init_chunk_worker, initargs=(ctx,)) if pool_start != "fork" else {}
+    with mpc.Pool(min(workers, len(chunks)), **init) as pool:
+        return pool.map(fn, chunks, chunksize=1)
 
 
 def build_candidates(cfg: Config, split: str, subworld: bool = False,
@@ -309,6 +360,7 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
     min_score = cfg.get("blocking.min_score", None)   # None or 0 = off
     chunk_rows = int(cfg.get("blocking.chunk_rows", 50_000))
     limits = pass_limits(cfg)
+    workers, pool_start = int(cfg.get("blocking.workers", 1)), str(cfg.get("blocking.pool_start", "spawn"))
     print(f"  k_per_query={k_per_query}, max_cands={max_cands}, min_score={min_score}, chunk_rows={chunk_rows}, "
           f"limits={limits}")
 
@@ -319,7 +371,8 @@ def build_candidates(cfg: Config, split: str, subworld: bool = False,
             tc = time.time()
             cols = RECORD_COLS + (["name_raw"] if limits["fuzzy"] else [])   # pass E cleans handles from name_raw
             recs = pl.scan_parquet(path).filter(pl.col("country") == country).select(cols).collect()
-            kept_files += _block_country(recs, country, Path(tmp), chunk_rows, k_per_query, min_score, limits)
+            kept_files += _block_country(recs, country, Path(tmp), chunk_rows, k_per_query, min_score, limits,
+                                         workers, pool_start)
             del recs
             print(f"    {country} done in {time.time() - tc:.1f}s")
         candidates = (pl.concat([pl.read_parquet(f) for f in kept_files]) if kept_files

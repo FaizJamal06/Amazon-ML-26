@@ -87,7 +87,8 @@ def test_ties_are_deterministic():
 
 def test_config_k_per_query_is_honored():
     """normalize + block on a stub world: --set blocking.k_per_query=1 gives fewer pairs than the default (2),
-    and every kept rank_in_cand is <= k. Streaming in tiny chunks (7 query records) gives the identical output."""
+    and every kept rank_in_cand is <= k. Streaming in tiny chunks (7 query records), sequentially or with a 2-worker
+    pool, gives the identical output."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         cache = Path(d)
         rec, _, _ = stub.build_split("train", ["US", "India"], 30, np.random.default_rng(42))
@@ -104,9 +105,12 @@ def test_config_k_per_query_is_honored():
             k1 = pl.read_parquet(cache / "candidates_train.parquet")
             main(["block", "--split", "train", *sets, "--set", "blocking.chunk_rows=7"])
             k2_small_chunks = pl.read_parquet(cache / "candidates_train.parquet")
+            main(["block", "--split", "train", *sets, "--set", "blocking.chunk_rows=7", "--set", "blocking.workers=2"])
+            k2_two_workers = pl.read_parquet(cache / "candidates_train.parquet")
     assert k2["rank_in_cand"].max() == 2 and k1["rank_in_cand"].max() == 1
     assert k1.height < k2.height
     assert k2_small_chunks.equals(k2)
+    assert k2_two_workers.equals(k2)   # chunk-parallel block (spawn pool) gives the identical output
 
 
 if __name__ == "__main__":

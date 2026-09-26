@@ -43,7 +43,11 @@ class FuzzyIndex:
 
 
 def build_fuzzy_index(s1_records: pl.DataFrame, max_df: float = 0.002) -> FuzzyIndex:
-    """Fit char_wb 3-gram TF-IDF (l2-normalized, float32) on the S1 names; n-grams in > max_df of S1s are dropped."""
+    """Fit char_wb 3-gram TF-IDF (l2-normalized, float32) on the S1 names; n-grams in > max_df of S1s are dropped.
+
+    The cap never goes below 50 documents, so a small country (or the stub world) keeps a usable vocabulary.
+    """
+    max_df = min(1.0, max(max_df, 50 / max(s1_records.height, 1)))
     vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 3), max_df=max_df, dtype=np.float32, sublinear_tf=True)
     m = vec.fit_transform(fuzzy_text(s1_records).to_list())
     return FuzzyIndex(vec, m.T.tocsr(), s1_records["entity_id"].to_numpy())

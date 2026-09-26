@@ -21,11 +21,13 @@ from rapidfuzz import fuzz
 
 from ber.blocking.keys import (
     build_address_index,
+    build_combo_index,
     build_house_index,
     build_name_index,
     compute_df_counts,
     compute_token_idf,
     query_address_index,
+    query_combo_index,
     query_house_index,
     query_name_index,
 )
@@ -38,11 +40,13 @@ from ber.normalize import _normalize_base, name_skeleton
 PASS_NAME_TOKEN = 0    # bit 0 (1 << 0 = 1)
 PASS_ADDR_KEY = 1      # bit 1 (1 << 1 = 2)
 PASS_HOUSE_NUM = 2     # bit 2 (1 << 2 = 4)
+PASS_NAME_STREET = 3   # bit 3 (1 << 3 = 8): exact name + (name token, street token) keys, scale-proof
 
 PASS_NAMES: dict[int, str] = {
     PASS_NAME_TOKEN: "name_token",
     PASS_ADDR_KEY: "addr_key",
     PASS_HOUSE_NUM: "house_num",
+    PASS_NAME_STREET: "name_street",
 }
 
 # rank_score = weighted cheap similarities (0-1 scale; a house-number conflict can push it below 0)
@@ -145,7 +149,12 @@ def _cap_candidates(candidates: pl.DataFrame, k_per_query: int = 2,
 
 
 PASS_LIMITS = {"name_freq_cap": 2000, "addr_freq_cap": 2000, "house_freq_cap": 50, "top_k_per_query": 50,
-               "name_pair_keys": 0}  # name_pair_keys: 1 = also key on pairs of frequent name tokens (keys._pair_keys)
+               "name_pair_keys": 0, "addr_key_cap": 0, "name_street_cap": 0}
+# name_pair_keys: 1 = also key on pairs of frequent name tokens (keys._pair_keys).
+# addr_key_cap: 0 = street tokens above addr_freq_cap are skipped; N > 0 = no token cap, but (number, token) keys shared
+# by more than N S1s are dropped (keys._street_keys).
+# name_street_cap: 0 = pass D off; N > 0 = pass D on (exact-name + (name token, street token) keys, keys shared by
+# more than N S1s dropped; keys._combo_keys).
 
 
 def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int, k_per_query: int,
@@ -171,8 +180,11 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
     legal_skel = frozenset(t for form in rules.legal_forms(country) for t in name_skeleton(_normalize_base(form)).split())
     name_index = build_name_index(s1_recs, name_idf, name_df, skel_idf, skel_df, legal_skel,
                                   freq_cap=lim["name_freq_cap"], pair_keys=bool(lim["name_pair_keys"]))
-    addr_index = build_address_index(s1_recs, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"])
+    addr_index = build_address_index(s1_recs, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"],
+                                     key_cap=lim["addr_key_cap"])
     house_index = build_house_index(s1_recs, house_idf, house_df, freq_cap=lim["house_freq_cap"])
+    combo_index = (build_combo_index(s1_recs, name_idf, skel_idf, addr_idf, legal_skel, key_cap=lim["name_street_cap"])
+                   if lim["name_street_cap"] else None)
     print(f"    indexes built in {time.time() - t:.1f}s")
 
     raw_files, pass_max, n_raw = [], {}, 0
@@ -184,16 +196,20 @@ def _block_country(recs: pl.DataFrame, country: str, tmp: Path, chunk_rows: int,
                              pair_keys=bool(lim["name_pair_keys"]))
             .with_columns(bit=PASS_NAME_TOKEN),
             query_address_index(addr_index, part, addr_idf, addr_df, freq_cap=lim["addr_freq_cap"],
-                                top_k_per_query=lim["top_k_per_query"]).with_columns(bit=PASS_ADDR_KEY),
+                                top_k_per_query=lim["top_k_per_query"], key_cap=lim["addr_key_cap"])
+            .with_columns(bit=PASS_ADDR_KEY),
             query_house_index(house_index, part, house_df, freq_cap=lim["house_freq_cap"])
             .with_columns(bit=PASS_HOUSE_NUM),
+            *([query_combo_index(combo_index, part, name_idf, skel_idf, addr_idf, legal_skel,
+                                 top_k_per_query=lim["top_k_per_query"]).with_columns(bit=PASS_NAME_STREET)]
+              if combo_index is not None else []),
         ]).with_columns(pl.col("bit").cast(pl.Int8))
         for bit, mx in raw.group_by("bit").agg(pl.col("score").max()).iter_rows():
             pass_max[bit] = max(pass_max.get(bit, 0.0), mx)
         n_raw += raw.height
         raw_files.append(tmp / f"{country}_raw_{i:05d}.parquet")
         raw.write_parquet(raw_files[-1])
-    del name_index, addr_index, house_index
+    del name_index, addr_index, house_index, combo_index
     print(f"    phase 1: {n_raw:,} raw pass hits in {len(raw_files)} chunks ({time.time() - t:.1f}s)")
 
     rank_recs = recs.select("entity_id", *RANK_FIELDS)

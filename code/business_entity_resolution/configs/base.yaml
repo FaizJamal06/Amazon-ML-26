@@ -8,6 +8,9 @@ decision_margin: 0.0     # extra conservatism in set selection; tuned with LB fe
 blocking:
   k_per_query: 2         # per S2/S3 record, keep its top-k S1s (rank_in_cand <= k)
   min_score: null        # drop pairs with block_score (sum of per-pass normalized scores, 0-3) below this; null/0 = off
+  chunk_rows: 50000      # S2/S3 records per streaming chunk (memory is bounded by this, not by country size)
+  addr_key_cap: 50       # address pass: street tokens chosen without the frequency cap; (number, token) keys shared by > 50 S1s dropped
+  name_street_cap: 50    # pass D: exact-name + (name token, street token) keys; keys shared by > 50 S1s dropped (0 = off)
 
 decide:
   method: threshold      # threshold | ef05_exact | ef05_approx (v2 only after it wins on real full-world OOF)

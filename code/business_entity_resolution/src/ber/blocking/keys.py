@@ -20,52 +20,26 @@ import polars as pl
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def compute_token_idf(records: pl.DataFrame, column: str, country: str) -> dict[str, float]:
+def compute_token_idf(records: pl.DataFrame, column: str, country: str,
+                      df_counts: dict[str, int] | None = None) -> dict[str, float]:
     """Compute IDF for each token in *column* within a country.
 
-    IDF = log(N / df_t) where df_t = number of documents containing token t.
+    IDF = log(N / df_t) where df_t = number of documents containing token t and N = records of the country.
 
     Args:
-        records: DataFrame with 'entity_id', 'country', and *column* (list[str] or str).
+        records: DataFrame with 'country' and *column* (list[str] or str).
         column: Column name containing tokens (list[str]) or text (str to split).
         country: Country to filter on.
+        df_counts: the country's compute_df_counts result, if already computed (avoids a second pass).
 
     Returns:
         dict mapping token → IDF score.
     """
-    subset = records.filter(pl.col("country") == country)
-    n_docs = subset.height
-
+    n_docs = records.filter(pl.col("country") == country).height
     if n_docs == 0:
         return {}
-
-    # Explode tokens
-    if subset.schema[column] == pl.List(pl.String):
-        exploded = subset.select("entity_id", column).explode(column).rename({column: "token"})
-    else:
-        exploded = (
-            subset.select("entity_id", column)
-            .with_columns(pl.col(column).str.split(" ").alias("_tokens"))
-            .explode("_tokens")
-            .rename({"_tokens": "token"})
-            .select("entity_id", "token")
-        )
-
-    # Document frequency
-    df_counts = (
-        exploded
-        .filter(pl.col("token").is_not_null() & (pl.col("token") != ""))
-        .unique(["entity_id", "token"])
-        .group_by("token")
-        .agg(df=pl.len())
-    )
-
-    idf: dict[str, float] = {}
-    for row in df_counts.iter_rows():
-        token, df_val = row[0], row[1]
-        idf[token] = math.log(n_docs / max(df_val, 1))
-
-    return idf
+    df_counts = compute_df_counts(records, column, country) if df_counts is None else df_counts
+    return {token: math.log(n_docs / max(df_val, 1)) for token, df_val in df_counts.items()}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -117,55 +91,79 @@ def _top_scores(index: Index, keys: list, top_k: int) -> list[tuple[str, float]]
     return [(s, s1_scores[s]) for s in heapq.nlargest(min(top_k, len(s1_scores)), s1_scores, key=s1_scores.get)]
 
 
+def _pair_keys(tokens: list[str], idf: dict[str, float], country_df: dict[str, int], freq_cap: int,
+               k: int = 3) -> list[tuple[tuple[str, str], float]]:
+    """Scale-proof keys: sorted (a, b) pairs among the k rarest tokens (ignoring the cap) where at least one of the
+    two is above freq_cap, with weight idf(a) + idf(b). Two frequent words ('shree', 'precision') are still a rare
+    pair, so these keys keep working when a bigger world pushes single tokens over the absolute cap."""
+    top = _get_rarest_tokens(tokens, idf, k, freq_cap, None)  # country_df=None -> no cap
+    capped = {t for t in top if country_df.get(t, 0) > freq_cap}
+    return [(tuple(sorted((a, b))), idf.get(a, 10.0) + idf.get(b, 10.0))
+            for i, a in enumerate(top) for b in top[i + 1:] if a in capped or b in capped]
+
+
 def _name_keys(row: dict, idf: dict[str, float], country_df: dict[str, int], skel_idf: dict[str, float],
                skel_df: dict[str, int], freq_cap: int, k_tokens: int, always_skeleton: bool,
-               legal_skel: frozenset[str]) -> list[str]:
-    """Rarest name_core tokens of a record (legal form removed) + rarest skeleton tokens that are not the skeleton of
-    a legal-form word (always for S1, only non-Latin for queries), so 'limited' / 'private' / 'llc' and their
-    transliterations ('limiteda' -> 'lmtd') never take the slots."""
-    rare = _get_rarest_tokens((row["name_core"] or "").split(), idf, k_tokens, freq_cap, country_df)
+               legal_skel: frozenset[str], pair_keys: bool = False) -> list[tuple]:
+    """(key, weight) of a record: rarest name_core tokens (legal form removed) + rarest skeleton tokens that are not
+    the skeleton of a legal-form word (always for S1, only non-Latin for queries), so 'limited' / 'private' / 'llc'
+    and their transliterations ('limiteda' -> 'lmtd') never take the slots; + _pair_keys when ``pair_keys``."""
+    core = (row["name_core"] or "").split()
+    rare = _get_rarest_tokens(core, idf, k_tokens, freq_cap, country_df)
+    pairs = _pair_keys(core, idf, country_df, freq_cap) if pair_keys else []
     if row["name_skeleton"] and (always_skeleton or row["name_script"] != "Latin"):
         skel_tokens = [t for t in row["name_skeleton"].split() if t not in legal_skel]
         skel_rare = _get_rarest_tokens(skel_tokens, skel_idf, k_tokens, freq_cap, skel_df)
         rare = list(dict.fromkeys(rare + skel_rare))  # ordered dedup: set order varies per process
-    return rare
+        if pair_keys:
+            pairs += _pair_keys(skel_tokens, skel_idf, skel_df, freq_cap)
+    return [(t, idf.get(t, skel_idf.get(t, 10.0))) for t in rare] + list(dict(pairs).items())
 
 
 def build_name_index(s1_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
                      skel_idf: dict[str, float], skel_df: dict[str, int], legal_skel: frozenset[str] = frozenset(),
-                     freq_cap: int = 2000, k_tokens: int = 3) -> Index:
+                     freq_cap: int = 2000, k_tokens: int = 3, pair_keys: bool = False) -> Index:
     """Pass A index, built once per country: rare name_core token (or skeleton token) -> [(s1_id, idf)].
 
     Skeleton tokens are always indexed for S1: the skeleton is the shared representation between Latin S1 names
-    and transliterated non-Latin S2/S3 names.
+    and transliterated non-Latin S2/S3 names. With ``pair_keys``, (a, b) pair keys are indexed too; a pair shared by
+    more than freq_cap // 4 S1s is dropped (S1 postings vs all-source document frequency, ~1:4.7).
     """
     index: Index = {}
     for row in s1_records.select("entity_id", "name_core", "name_skeleton", "name_script").iter_rows(named=True):
-        for token in _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=True,
-                                legal_skel=legal_skel):
-            index.setdefault(token, []).append((row["entity_id"], idf.get(token, skel_idf.get(token, 10.0))))
+        for key, weight in _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens,
+                                      always_skeleton=True, legal_skel=legal_skel, pair_keys=pair_keys):
+            index.setdefault(key, []).append((row["entity_id"], weight))
+    for key in [k for k, v in index.items() if isinstance(k, tuple) and len(v) > freq_cap // 4]:
+        del index[key]
     return index
 
 
 def query_name_index(index: Index, query_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
                      skel_idf: dict[str, float], skel_df: dict[str, int], legal_skel: frozenset[str] = frozenset(),
-                     freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 50) -> pl.DataFrame:
+                     freq_cap: int = 2000, k_tokens: int = 3, top_k_per_query: int = 50,
+                     pair_keys: bool = False) -> pl.DataFrame:
     """Pass A on a chunk of S2/S3 records: each record retrieves its top S1s by the summed IDF of shared rare tokens.
 
     Direction S2/S3 -> S1, within one country. Returns (cand_id, s1_id, score).
     """
     pairs = []
     for row in query_records.select("entity_id", "name_core", "name_skeleton", "name_script").iter_rows(named=True):
-        keys = _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens, always_skeleton=False,
-                          legal_skel=legal_skel)
+        keys = [k for k, _ in _name_keys(row, idf, country_df, skel_idf, skel_df, freq_cap, k_tokens,
+                                          always_skeleton=False, legal_skel=legal_skel, pair_keys=pair_keys)]
         pairs += [(row["entity_id"], s1, sc) for s1, sc in _top_scores(index, keys, top_k_per_query)]
     return _pairs_frame(pairs)
 
 
 def _street_keys(row: dict, idf: dict[str, float], country_df: dict[str, int], freq_cap: int,
-                 k_tokens: int) -> list[tuple[str, str]]:
+                 k_tokens: int, key_cap: int = 0) -> list[tuple[str, str]]:
     """(number, rare street token) keys for EVERY number in the address (addr_nums, not only house_num), so a
-    spurious extra number ('818 F-25', 'No. 337 1/598') does not hide the real one; [] when there is no number."""
+    spurious extra number ('818 F-25', 'No. 337 1/598') does not hide the real one; [] when there is no number.
+
+    key_cap = 0: street tokens above freq_cap are skipped (at full scale 'spring', 'street' are, so many addresses
+    get no key). key_cap > 0: the rarest street tokens are taken without the token cap, because the (number, token)
+    combination is rare anyway; build_address_index then drops keys shared by more than key_cap S1s.
+    """
     nums = list(dict.fromkeys(n for n in (row["addr_nums"] or []) if n))
     if not nums:
         return []
@@ -173,28 +171,32 @@ def _street_keys(row: dict, idf: dict[str, float], country_df: dict[str, int], f
     if not street_tokens:
         num_set = set(nums)
         street_tokens = [t for t in (row["addr_norm"] or "").split() if t not in num_set and t.lstrip("0") not in num_set]
-    rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, country_df)
+    rare = _get_rarest_tokens(street_tokens, idf, k_tokens, freq_cap, None if key_cap else country_df)
     return [(n, t) for n in nums for t in rare]
 
 
 def build_address_index(s1_records: pl.DataFrame, idf: dict[str, float], country_df: dict[str, int],
-                        freq_cap: int = 2000, k_tokens: int = 2) -> Index:
-    """Pass B index, built once per country: (any address number, rare street token) -> [(s1_id, idf)]."""
+                        freq_cap: int = 2000, k_tokens: int = 2, key_cap: int = 0) -> Index:
+    """Pass B index, built once per country: (any address number, rare street token) -> [(s1_id, idf)].
+    With key_cap > 0, keys shared by more than key_cap S1s are dropped (see _street_keys)."""
     index: Index = {}
     for row in s1_records.select("entity_id", "addr_nums", "addr_street", "addr_norm").iter_rows(named=True):
-        for key in _street_keys(row, idf, country_df, freq_cap, k_tokens):
+        for key in _street_keys(row, idf, country_df, freq_cap, k_tokens, key_cap):
             index.setdefault(key, []).append((row["entity_id"], idf.get(key[1], 10.0)))
+    if key_cap:
+        for key in [k for k, v in index.items() if len(v) > key_cap]:
+            del index[key]
     return index
 
 
 def query_address_index(index: Index, query_records: pl.DataFrame, idf: dict[str, float],
                         country_df: dict[str, int], freq_cap: int = 2000, k_tokens: int = 2,
-                        top_k_per_query: int = 50) -> pl.DataFrame:
+                        top_k_per_query: int = 50, key_cap: int = 0) -> pl.DataFrame:
     """Pass B on a chunk of S2/S3 records: S1s sharing any address number + a rare street token.
     (cand_id, s1_id, score)."""
     pairs = []
     for row in query_records.select("entity_id", "addr_nums", "addr_street", "addr_norm").iter_rows(named=True):
-        keys = _street_keys(row, idf, country_df, freq_cap, k_tokens)
+        keys = _street_keys(row, idf, country_df, freq_cap, k_tokens, key_cap)
         pairs += [(row["entity_id"], s1, sc) for s1, sc in _top_scores(index, keys, top_k_per_query)]
     return _pairs_frame(pairs)
 
@@ -224,44 +226,90 @@ def query_house_index(index: Index, query_records: pl.DataFrame, country_df: dic
     return _pairs_frame(pairs)
 
 
+def _street_tokens(row: dict) -> list[str]:
+    """Street tokens of a record: addr_street, or addr_norm minus its numbers when addr_street is empty."""
+    tokens = (row["addr_street"] or "").split()
+    if tokens:
+        return tokens
+    nums = set(row["addr_nums"] or [])
+    return [t for t in (row["addr_norm"] or "").split() if t not in nums and t.lstrip("0") not in nums]
+
+
+def _combo_keys(row: dict, name_idf: dict[str, float], skel_idf: dict[str, float], street_idf: dict[str, float],
+                legal_skel: frozenset[str], always_skeleton: bool, k_name: int = 2,
+                k_street: int = 2) -> list[tuple[tuple, float]]:
+    """Scale-proof (key, weight) of a record for pass D.
+
+    - ('core', sorted unique name_core tokens): the exact name, order-insensitive;
+    - (name token, street token) for the k_name rarest name_core tokens (+ the rarest non-legal skeleton tokens,
+      always for S1, only non-Latin for queries) x the k_street rarest street tokens.
+    Tokens are chosen by IDF WITHOUT the document-frequency cap: 'foot', 'ankle', 'northridge' are each common at full
+    scale, but ('ankle', 'northridge') is rare. build_combo_index drops keys shared by too many S1s instead.
+    """
+    core = [t for t in dict.fromkeys((row["name_core"] or "").split()) if len(t) >= 2]
+    keys: list[tuple[tuple, float]] = []
+    if core:
+        keys.append((("core", " ".join(sorted(core))), sum(name_idf.get(t, 10.0) for t in core)))
+    names = [(t, name_idf.get(t, 10.0)) for t in _get_rarest_tokens(core, name_idf, k_name, 0, None)]
+    if row["name_skeleton"] and (always_skeleton or row["name_script"] != "Latin"):
+        skel = [t for t in row["name_skeleton"].split() if t not in legal_skel]
+        names += [(t, skel_idf.get(t, 10.0)) for t in _get_rarest_tokens(skel, skel_idf, k_name, 0, None)]
+    streets = [(t, street_idf.get(t, 10.0)) for t in _get_rarest_tokens(_street_tokens(row), street_idf, k_street, 0, None)]
+    keys += [((a, b), wa + wb) for a, wa in dict(names).items() for b, wb in streets]
+    return keys
+
+
+def build_combo_index(s1_records: pl.DataFrame, name_idf: dict[str, float], skel_idf: dict[str, float],
+                      street_idf: dict[str, float], legal_skel: frozenset[str] = frozenset(),
+                      key_cap: int = 50) -> Index:
+    """Pass D index, built once per country: exact-name and (name token, street token) keys -> [(s1_id, weight)].
+    Keys shared by more than ``key_cap`` S1s are dropped (a chain name, or a common name on a common street)."""
+    index: Index = {}
+    cols = ["entity_id", "name_core", "name_skeleton", "name_script", "addr_street", "addr_norm", "addr_nums"]
+    for row in s1_records.select(cols).iter_rows(named=True):
+        for key, weight in _combo_keys(row, name_idf, skel_idf, street_idf, legal_skel, always_skeleton=True):
+            index.setdefault(key, []).append((row["entity_id"], weight))
+    for key in [k for k, v in index.items() if len(v) > key_cap]:
+        del index[key]
+    return index
+
+
+def query_combo_index(index: Index, query_records: pl.DataFrame, name_idf: dict[str, float],
+                      skel_idf: dict[str, float], street_idf: dict[str, float],
+                      legal_skel: frozenset[str] = frozenset(), top_k_per_query: int = 50) -> pl.DataFrame:
+    """Pass D on a chunk of S2/S3 records: S1s sharing the exact name or a (name token, street token) pair.
+    (cand_id, s1_id, score)."""
+    pairs = []
+    cols = ["entity_id", "name_core", "name_skeleton", "name_script", "addr_street", "addr_norm", "addr_nums"]
+    for row in query_records.select(cols).iter_rows(named=True):
+        keys = [k for k, _ in _combo_keys(row, name_idf, skel_idf, street_idf, legal_skel, always_skeleton=False)]
+        pairs += [(row["entity_id"], s1, sc) for s1, sc in _top_scores(index, keys, top_k_per_query)]
+    return _pairs_frame(pairs)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # §5  HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 def compute_df_counts(records: pl.DataFrame, column: str, country: str) -> dict[str, int]:
-    """Compute document frequency (count of unique entities containing each token) within a country.
+    """Compute document frequency (count of records containing each token) within a country.
+
+    Tokens are de-duplicated per record (list.unique) before counting, so no (entity_id, token) table is built:
+    the transient memory is one token column instead of id + token pairs.
 
     Args:
-        records: DataFrame with 'entity_id', 'country', and *column*.
-        column: Column name containing tokens (list[str]) or text (str).
+        records: DataFrame with 'country' and *column*.
+        column: Column name containing tokens (list[str]) or text (str, split on spaces).
         country: Country to filter on.
 
     Returns:
         dict mapping token → count.
     """
-    subset = records.filter(pl.col("country") == country)
-
-    if subset.height == 0:
-        return {}
-
-    if subset.schema[column] == pl.List(pl.String):
-        exploded = subset.select("entity_id", column).explode(column).rename({column: "token"})
-    else:
-        exploded = (
-            subset.select("entity_id", column)
-            .with_columns(pl.col(column).str.split(" ").alias("_tokens"))
-            .explode("_tokens")
-            .rename({"_tokens": "token"})
-            .select("entity_id", "token")
-        )
-
-    df_counts = (
-        exploded
-        .filter(pl.col("token").is_not_null() & (pl.col("token") != ""))
-        .unique(["entity_id", "token"])
-        .group_by("token")
-        .agg(df=pl.len())
-    )
-
-    return {row[0]: row[1] for row in df_counts.iter_rows()}
+    col = pl.col(column)
+    tokens = col if records.schema[column] == pl.List(pl.String) else col.str.split(" ")
+    counts = (records.lazy().filter(pl.col("country") == country)
+              .select(tokens.list.unique().alias("token")).explode("token")
+              .filter(pl.col("token").is_not_null() & (pl.col("token") != ""))
+              .group_by("token").agg(df=pl.len()).collect())
+    return dict(zip(counts["token"].to_list(), counts["df"].to_list()))
